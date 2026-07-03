@@ -22,7 +22,7 @@ using namespace ast;
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN
+WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -42,16 +42,17 @@ WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_CO
 %type <sv_val> value
 %type <sv_vals> valueList
 %type <sv_str> tbName colName
-%type <sv_strs> tableList colNameList
+%type <sv_strs> colNameList
 %type <sv_col> col
 %type <sv_cols> colList selector
 %type <sv_set_clause> setClause
 %type <sv_set_clauses> setClauses
 %type <sv_cond> condition
-%type <sv_conds> whereClause optWhereClause
+%type <sv_conds> whereClause optWhereClause optOnClause
 %type <sv_orderby>  order_clause opt_order_clause
 %type <sv_orderby_dir> opt_asc_desc
 %type <sv_setKnobType> set_knob_type
+%type <sv_from_clause> fromList tableRef
 
 %%
 start:
@@ -158,14 +159,26 @@ dml:
     {
         $$ = std::make_shared<UpdateStmt>($2, $4, $5);
     }
-    |   SELECT selector FROM tableList optWhereClause opt_order_clause
+    |   SELECT selector FROM fromList optWhereClause opt_order_clause
     {
-        $$ = std::make_shared<SelectStmt>($2, $4, $5, $6);
+        // 合并 JOIN ON 条件和 WHERE 条件
+        auto all_conds = $5;
+        for (auto& jc : $4->join_conds) {
+            all_conds.push_back(jc);
+        }
+        auto stmt = std::make_shared<SelectStmt>($2, $4->tab_names, all_conds, $6);
+        stmt->aliases = std::move($4->aliases);
+        $$ = std::move(stmt);
     }
-    |   EXPLAIN SELECT selector FROM tableList optWhereClause opt_order_clause
+    |   EXPLAIN SELECT selector FROM fromList optWhereClause opt_order_clause
     {
-        auto select_stmt = std::make_shared<SelectStmt>($3, $5, $6, $7);
-        $$ = std::make_shared<ExplainStmt>(select_stmt);
+        auto all_conds = $6;
+        for (auto& jc : $5->join_conds) {
+            all_conds.push_back(jc);
+        }
+        auto select_stmt = std::make_shared<SelectStmt>($3, $5->tab_names, all_conds, $7);
+        select_stmt->aliases = std::move($5->aliases);
+        $$ = std::make_shared<ExplainStmt>(std::move(select_stmt));
     }
     ;
 
@@ -251,7 +264,7 @@ condition:
     ;
 
 optWhereClause:
-        /* epsilon */ { /* ignore*/ }
+        /* epsilon */ { $$ = std::vector<std::shared_ptr<ast::BinaryExpr>>(); }
     |   WHERE whereClause
     {
         $$ = $2;
@@ -355,20 +368,54 @@ selector:
     |   colList
     ;
 
-tableList:
+/** 单个表引用：表名 [别名] */
+tableRef:
         tbName
     {
-        $$ = std::vector<std::string>{$1};
+        auto fc = std::make_shared<ast::FromClause>();
+        fc->tab_names.push_back($1);
+        $$ = fc;
     }
-    |   tableList ',' tbName
+    |   tbName IDENTIFIER
     {
-        $$.push_back($3);
-    }
-    |   tableList JOIN tbName
-    {
-        $$.push_back($3);
+        auto fc = std::make_shared<ast::FromClause>();
+        fc->tab_names.push_back($1);
+        fc->aliases[$2] = $1;   // 别名 → 真实表名
+        $$ = fc;
     }
     ;
+
+/** JOIN ON 子句（可选） */
+optOnClause:
+        /* epsilon */ { $$ = std::vector<std::shared_ptr<ast::BinaryExpr>>(); }
+    |   ON whereClause { $$ = $2; }
+    ;
+
+/** FROM 子句：表引用列表，支持逗号和 JOIN 连接 */
+fromList:
+        tableRef
+    {
+        $$ = $1;
+    }
+    |   fromList ',' tableRef
+    {
+        auto& dst = $1->tab_names;
+        dst.insert(dst.end(), $3->tab_names.begin(), $3->tab_names.end());
+        $1->aliases.insert($3->aliases.begin(), $3->aliases.end());
+        $$ = $1;
+    }
+    |   fromList JOIN tableRef optOnClause
+    {
+        auto& dst = $1->tab_names;
+        dst.insert(dst.end(), $3->tab_names.begin(), $3->tab_names.end());
+        $1->aliases.insert($3->aliases.begin(), $3->aliases.end());
+        for (auto& cond : $4) {
+            $1->join_conds.push_back(cond);
+        }
+        $$ = $1;
+    }
+    ;
+
 
 opt_order_clause:
     ORDER BY order_clause      

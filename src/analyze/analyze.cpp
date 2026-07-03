@@ -41,12 +41,18 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
             sm_manager_->db_.get_table(tab_name);
         }
 
-        // 处理target list，再target list中添加上表名，例如 a.id
+        // 处理target list，在此阶段解析别名引用
         for (auto &sv_sel_col : x->cols) {
-            TabCol sel_col = {.tab_name = sv_sel_col->tab_name, .col_name = sv_sel_col->col_name};
+            std::string tab_name = sv_sel_col->tab_name;
+            // 如果列的表名是别名，解析为真实表名
+            auto alias_it = x->aliases.find(tab_name);
+            if (alias_it != x->aliases.end()) {
+                tab_name = alias_it->second;
+            }
+            TabCol sel_col = {.tab_name = tab_name, .col_name = sv_sel_col->col_name};
             query->cols.push_back(sel_col);
         }
-        
+
         std::vector<ColMeta> all_cols;
         get_all_cols(query->tables, all_cols);
         if (query->cols.empty()) {
@@ -61,8 +67,23 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 sel_col = check_column(all_cols, sel_col);  // 列元数据校验
             }
         }
-        //处理where条件
+        //处理where条件（含 JOIN ON 条件，已在解析器中合并）
         get_clause(x->conds, query->conds);
+        // 解析条件中的别名引用
+        if (!x->aliases.empty()) {
+            for (auto& cond : query->conds) {
+                auto it = x->aliases.find(cond.lhs_col.tab_name);
+                if (it != x->aliases.end()) {
+                    cond.lhs_col.tab_name = it->second;
+                }
+                if (!cond.is_rhs_val) {
+                    auto it2 = x->aliases.find(cond.rhs_col.tab_name);
+                    if (it2 != x->aliases.end()) {
+                        cond.rhs_col.tab_name = it2->second;
+                    }
+                }
+            }
+        }
         check_clause(query->tables, query->conds);
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
         // 检查表是否存在

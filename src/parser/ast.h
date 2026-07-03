@@ -9,6 +9,7 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 #pragma once
 
+#include <map>
 #include <vector>
 #include <string>
 #include <memory>
@@ -220,13 +221,23 @@ struct JoinExpr : public TreeNode {
             left(std::move(left_)), right(std::move(right_)), conds(std::move(conds_)), type(type_) {}
 };
 
+/** FROM 子句解析结果：表名列表 + 别名映射 + JOIN ON 条件 */
+struct FromClause {
+    std::vector<std::string> tab_names;                         // 真实表名列表
+    std::map<std::string, std::string> aliases;                 // 别名 → 真实表名
+    std::vector<std::shared_ptr<BinaryExpr>> join_conds;        // JOIN ON 条件
+};
+
 struct SelectStmt : public TreeNode {
     std::vector<std::shared_ptr<Col>> cols;
     std::vector<std::string> tabs;
     std::vector<std::shared_ptr<BinaryExpr>> conds;
     std::vector<std::shared_ptr<JoinExpr>> jointree;
 
-    
+    /** 别名映射：alias → real_table_name，由解析器填充，分析器用于解析列引用 */
+    std::map<std::string, std::string> aliases;
+
+
     bool has_sort;
     std::shared_ptr<OrderBy> order;
 
@@ -235,7 +246,7 @@ struct SelectStmt : public TreeNode {
                std::vector<std::string> tabs_,
                std::vector<std::shared_ptr<BinaryExpr>> conds_,
                std::shared_ptr<OrderBy> order_) :
-            cols(std::move(cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)), 
+            cols(std::move(cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)),
             order(std::move(order_)) {
                 has_sort = (bool)order;
             }
@@ -291,6 +302,8 @@ struct SemValue {
     std::vector<std::shared_ptr<BinaryExpr>> sv_conds;
 
     std::shared_ptr<OrderBy> sv_orderby;
+
+    std::shared_ptr<FromClause> sv_from_clause;
 
     SetKnobType sv_setKnobType;
 };

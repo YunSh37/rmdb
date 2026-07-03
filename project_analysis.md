@@ -1,6 +1,6 @@
 # RMDB 项目分析文档
 
-> 最后更新：2026-07-03 | 题目三"唯一索引"完成后更新
+> 最后更新：2026-07-03 | 题目四"选择运算下推与投影下推"完成后更新（支持表别名和 JOIN ON）
 
 ## 项目概览
 
@@ -46,7 +46,7 @@ rmdb/
 |------|------|
 | `yacc.y` | Bison 语法文件，定义完整 SQL 语法规则 |
 | `lex.l` | Flex 词法文件，定义 token 规则 |
-| `ast.h/cpp` | AST 节点定义（CreateTable、SelectStmt、InsertStmt 等） |
+| `ast.h/cpp` | AST 节点定义（CreateTable、SelectStmt、InsertStmt、FromClause 等） |
 | `parse_node.h` | 语法树节点基类 |
 | `parser_defs.h` | 解析器常量定义 |
 
@@ -56,6 +56,8 @@ rmdb/
 - 其他: `SHOW TABLES`, `SHOW INDEX FROM`, `HELP`, `EXIT`, `BEGIN/COMMIT/ABORT/ROLLBACK`
 - 表达式: 6 种比较运算符（`=` `<>` `<` `>` `<=` `>=`），AND 连接
 - 数据类型: INT, FLOAT, CHAR(n)
+- **表别名**: `table_name alias`（如 `students s`）
+- **JOIN ON**: `JOIN table_name [alias] ON condition`（如 `join classes c on s.class_id = c.class_id`）
 
 ### 2. Analyze 模块（`src/analyze/`）
 

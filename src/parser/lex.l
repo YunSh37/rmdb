@@ -85,6 +85,7 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "HELP" { return HELP; }
 "ORDER" { return ORDER; }
 "BY" {  return BY;  }
+"ON" { return ON; }
 "ASC" { return ASC; }
 "ENABLE_NESTLOOP" { return ENABLE_NESTLOOP; }
 "ENABLE_SORTMERGE" { return ENABLE_SORTMERGE; }
