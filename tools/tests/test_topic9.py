@@ -109,40 +109,40 @@ TOPIC9_TEST6_VERIFY = [
 def run(tester: RMDBTester):
     """执行题目九全部6个测试点"""
 
-    # # ================================================================
-    # # 测试点1: 单线程小数据量故障恢复
-    # # ================================================================
-    # tester.run_tests("题目九 测试点1: 单线程故障恢复(crash前SQL)", TOPIC9_TEST1_CRASH)
-    # tester.send_crash()
-    # if tester.restart_after_crash():
-    #     tester.run_tests("题目九 测试点1: 单线程故障恢复(crash后验证)", TOPIC9_TEST1_VERIFY)
-    #     tester.cleanup_leftover_tables()
+    # ================================================================
+    # 测试点1: 单线程小数据量故障恢复
+    # ================================================================
+    tester.run_tests("题目九 测试点1: 单线程故障恢复(crash前SQL)", TOPIC9_TEST1_CRASH)
+    tester.send_crash()
+    if tester.restart_after_crash():
+        tester.run_tests("题目九 测试点1: 单线程故障恢复(crash后验证)", TOPIC9_TEST1_VERIFY)
+        tester.cleanup_leftover_tables()
 
-    # # 测试点1b: abort事务回滚验证
-    # tester.run_tests("题目九 测试点1b: Abort回滚(crash前SQL)", TOPIC9_TEST1B_CRASH)
-    # tester.send_crash()
-    # if tester.restart_after_crash():
-    #     tester.run_tests("题目九 测试点1b: Abort回滚(crash后验证)", TOPIC9_TEST1B_VERIFY)
-    #     tester.cleanup_leftover_tables()
+    # 测试点1b: abort事务回滚验证
+    tester.run_tests("题目九 测试点1b: Abort回滚(crash前SQL)", TOPIC9_TEST1B_CRASH)
+    tester.send_crash()
+    if tester.restart_after_crash():
+        tester.run_tests("题目九 测试点1b: Abort回滚(crash后验证)", TOPIC9_TEST1B_VERIFY)
+        tester.cleanup_leftover_tables()
 
-    # # ================================================================
-    # # 测试点2: 多线程小数据量故障恢复
-    # # ================================================================
-    # _run_test_point_2(tester)
+    # ================================================================
+    # 测试点2: 多线程小数据量故障恢复
+    # ================================================================
+    _run_test_point_2(tester)
 
-    # # ================================================================
-    # # 测试点3: 含索引故障恢复
-    # # ================================================================
-    # tester.run_tests("题目九 测试点3: 含索引故障恢复(crash前SQL)", TOPIC9_TEST3_CRASH)
-    # tester.send_crash()
-    # if tester.restart_after_crash():
-    #     tester.run_tests("题目九 测试点3: 含索引故障恢复(crash后验证)", TOPIC9_TEST3_VERIFY)
-    #     tester.cleanup_leftover_tables()
+    # ================================================================
+    # 测试点3: 含索引故障恢复
+    # ================================================================
+    tester.run_tests("题目九 测试点3: 含索引故障恢复(crash前SQL)", TOPIC9_TEST3_CRASH)
+    tester.send_crash()
+    if tester.restart_after_crash():
+        tester.run_tests("题目九 测试点3: 含索引故障恢复(crash后验证)", TOPIC9_TEST3_VERIFY)
+        tester.cleanup_leftover_tables()
 
-    # # ================================================================
-    # # 测试点4: 多线程大数据量故障恢复
-    # # ================================================================
-    # _run_test_point_4(tester)
+    # ================================================================
+    # 测试点4: 多线程大数据量故障恢复
+    # ================================================================
+    _run_test_point_4(tester)
 
     # ================================================================
     # 测试点5: 大数据量无检查点 + 恢复时间 t1
