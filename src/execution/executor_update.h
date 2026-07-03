@@ -25,6 +25,16 @@ class UpdateExecutor : public AbstractExecutor {
     std::vector<SetClause> set_clauses_;
     SmManager *sm_manager_;
 
+    /**
+     * @brief 检查某个索引列是否被更新
+     */
+    bool is_col_updated(const std::string& col_name) {
+        for (auto& clause : set_clauses_) {
+            if (clause.lhs.col_name == col_name) return true;
+        }
+        return false;
+    }
+
    public:
     UpdateExecutor(SmManager *sm_manager, const std::string &tab_name, std::vector<SetClause> set_clauses,
                    std::vector<Condition> conds, std::vector<Rid> rids, Context *context) {
@@ -37,24 +47,37 @@ class UpdateExecutor : public AbstractExecutor {
         rids_ = rids;
         context_ = context;
     }
+
     std::unique_ptr<RmRecord> Next() override {
         // 遍历所有需要更新的记录
         for (auto& rid : rids_) {
             // 1. 读取当前记录
             auto rec = fh_->get_record(rid, context_);
-            // 2. 对每个 set_clause 修改对应列
+
+            // 2. 如果有索引，先记录旧键（用于后续删除）
+            std::vector<std::string> old_keys;  // 每个索引的旧键
+            for (size_t i = 0; i < tab_.indexes.size(); ++i) {
+                auto& index = tab_.indexes[i];
+                char* old_key = new char[index.col_tot_len];
+                int offset = 0;
+                for (int j = 0; j < index.col_num; ++j) {
+                    memcpy(old_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                    offset += index.cols[j].len;
+                }
+                old_keys.push_back(std::string(old_key, index.col_tot_len));
+                delete[] old_key;
+            }
+
+            // 3. 对每个 set_clause 修改对应列
             for (auto& clause : set_clauses_) {
-                // 找到要更新的列
                 auto col_it = std::find_if(tab_.cols.begin(), tab_.cols.end(),
                     [&](const ColMeta& col) { return col.name == clause.lhs.col_name; });
                 if (col_it == tab_.cols.end()) {
                     throw ColumnNotFoundError(clause.lhs.col_name);
                 }
-                // 类型检查
                 if (col_it->type != clause.rhs.type) {
                     throw IncompatibleTypeError(coltype2str(col_it->type), coltype2str(clause.rhs.type));
                 }
-                // 确保 rhs 的 raw 数据已初始化
                 if (clause.rhs.raw == nullptr) {
                     Value val = clause.rhs;
                     val.init_raw(col_it->len);
@@ -63,7 +86,54 @@ class UpdateExecutor : public AbstractExecutor {
                     memcpy(rec->data + col_it->offset, clause.rhs.raw->data, col_it->len);
                 }
             }
-            // 3. 写回修改后的记录
+
+            // 4. 维护索引：删除旧键，检查新键唯一性，插入新键
+            for (size_t i = 0; i < tab_.indexes.size(); ++i) {
+                auto& index = tab_.indexes[i];
+                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
+                // 确保索引已打开
+                if (sm_manager_->ihs_.count(ix_name) == 0) {
+                    sm_manager_->ihs_.emplace(ix_name, sm_manager_->get_ix_manager()->open_index(tab_name_, index.cols));
+                }
+                auto ih = sm_manager_->ihs_.at(ix_name).get();
+
+                // 构建新键
+                char* new_key = new char[index.col_tot_len];
+                int offset = 0;
+                for (int j = 0; j < index.col_num; ++j) {
+                    memcpy(new_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                    offset += index.cols[j].len;
+                }
+
+                // 检查是否有索引列被更新
+                bool updated = false;
+                for (int j = 0; j < index.col_num; ++j) {
+                    if (is_col_updated(index.cols[j].name)) {
+                        updated = true;
+                        break;
+                    }
+                }
+
+                if (updated) {
+                    // 只有索引列被更新时才需要维护
+                    // 检查新键是否等于旧键
+                    if (memcmp(new_key, old_keys[i].c_str(), index.col_tot_len) != 0) {
+                        // 新键不同于旧键，检查唯一性
+                        std::vector<Rid> results;
+                        if (ih->get_value(new_key, &results, context_->txn_)) {
+                            delete[] new_key;
+                            throw DuplicateKeyError();
+                        }
+                        // 删除旧键
+                        ih->delete_entry(old_keys[i].c_str(), context_->txn_);
+                        // 插入新键
+                        ih->insert_entry(new_key, rid, context_->txn_);
+                    }
+                }
+                delete[] new_key;
+            }
+
+            // 5. 写回修改后的记录
             fh_->update_record(rid, rec->data, context_);
         }
         return nullptr;

@@ -22,7 +22,7 @@ using namespace ast;
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE
+WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -109,6 +109,10 @@ dbStmt:
     {
         $$ = std::make_shared<ShowTables>();
     }
+    |   SHOW INDEX FROM tbName
+    {
+        $$ = std::make_shared<ShowIndexes>($4);
+    }
     ;
 
 setStmt:
@@ -157,6 +161,11 @@ dml:
     |   SELECT selector FROM tableList optWhereClause opt_order_clause
     {
         $$ = std::make_shared<SelectStmt>($2, $4, $5, $6);
+    }
+    |   EXPLAIN SELECT selector FROM tableList optWhereClause opt_order_clause
+    {
+        auto select_stmt = std::make_shared<SelectStmt>($3, $5, $6, $7);
+        $$ = std::make_shared<ExplainStmt>(select_stmt);
     }
     ;
 

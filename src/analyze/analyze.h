@@ -34,6 +34,8 @@ class Query{
     std::vector<SetClause> set_clauses;
     //insert 的values值
     std::vector<Value> values;
+    // 是否为 EXPLAIN 查询
+    bool is_explain = false;
 
     Query(){}
 

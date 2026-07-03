@@ -100,6 +100,15 @@ void SmManager::open_db(const std::string& db_name) {
     for (auto& entry : db_.tabs_) {
         fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
     }
+    // 4. 为每张表打开索引文件
+    for (auto& tab_entry : db_.tabs_) {
+        for (auto& index : tab_entry.second.indexes) {
+            std::string ix_name = ix_manager_->get_index_name(tab_entry.first, index.cols);
+            if (ix_manager_->exists(tab_entry.first, index.cols)) {
+                ihs_.emplace(ix_name, ix_manager_->open_index(tab_entry.first, index.cols));
+            }
+        }
+    }
 }
 
 /**
@@ -245,7 +254,55 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
  * @param {Context*} context
  */
 void SmManager::create_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
-    
+    // 1. 检查表是否存在
+    TabMeta& tab = db_.get_table(tab_name);
+    // 2. 检查索引是否已存在
+    if (tab.is_index(col_names)) {
+        throw IndexExistsError(tab_name, col_names);
+    }
+    // 3. 校验列是否存在，并构建ColMeta列表
+    std::vector<ColMeta> index_cols;
+    for (auto& col_name : col_names) {
+        auto col_iter = tab.get_col(col_name);
+        index_cols.push_back(*col_iter);
+    }
+    // 4. 创建索引文件
+    ix_manager_->create_index(tab_name, index_cols);
+    // 5. 打开索引，扫描表中已有记录并插入索引
+    std::unique_ptr<IxIndexHandle> ih = ix_manager_->open_index(tab_name, index_cols);
+    RmFileHandle* fh = fhs_.at(tab_name).get();
+    // 构建索引键缓冲区
+    int key_len = 0;
+    for (auto& col : index_cols) {
+        key_len += col.len;
+    }
+    char* key_buf = new char[key_len];
+    // 扫描表中所有记录，插入索引
+    for (RmScan scan(fh); !scan.is_end(); scan.next()) {
+        Rid rid = scan.rid();
+        auto record = fh->get_record(rid, nullptr);
+        // 从记录中提取各列的值，拼成索引键
+        int offset = 0;
+        for (auto& col : index_cols) {
+            memcpy(key_buf + offset, record->data + col.offset, col.len);
+            offset += col.len;
+        }
+        // 插入索引（重复键的处理由IxNodeHandle::insert负责）
+        ih->insert_entry(key_buf, rid, context->txn_);
+    }
+    delete[] key_buf;
+    // 6. 将索引保持打开状态，存入ihs_
+    std::string ix_name = ix_manager_->get_index_name(tab_name, index_cols);
+    ihs_.emplace(ix_name, std::move(ih));
+    // 7. 更新元数据
+    IndexMeta index_meta;
+    index_meta.tab_name = tab_name;
+    index_meta.col_num = index_cols.size();
+    index_meta.col_tot_len = key_len;
+    index_meta.cols = index_cols;
+    tab.indexes.push_back(index_meta);
+    // 8. 持久化元数据
+    flush_meta();
 }
 
 /**
@@ -255,15 +312,65 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
  * @param {Context*} context
  */
 void SmManager::drop_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
-    
+    // 1. 检查表是否存在
+    TabMeta& tab = db_.get_table(tab_name);
+    // 2. 检查索引是否存在
+    auto index_iter = tab.get_index_meta(col_names);  // 不存在会抛异常
+    // 3. 获取索引文件名
+    std::string ix_name = ix_manager_->get_index_name(tab_name, col_names);
+    // 4. 如果索引文件已打开，先关闭
+    if (ihs_.count(ix_name)) {
+        ix_manager_->close_index(ihs_[ix_name].get());
+        ihs_.erase(ix_name);
+    }
+    // 5. 销毁索引文件
+    ix_manager_->destroy_index(tab_name, index_iter->cols);
+    // 6. 从元数据中移除
+    tab.indexes.erase(index_iter);
+    // 7. 持久化元数据
+    flush_meta();
+}
+
+void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMeta>& cols, Context* context) {
+    // 将ColMeta转换为col_names后调用上面的重载
+    std::vector<std::string> col_names;
+    for (auto& col : cols) {
+        col_names.push_back(col.name);
+    }
+    drop_index(tab_name, col_names, context);
 }
 
 /**
- * @description: 删除索引
+ * @description: 显示表上的所有索引
  * @param {string&} tab_name 表名称
- * @param {vector<ColMeta>&} 索引包含的字段元数据
  * @param {Context*} context
  */
-void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMeta>& cols, Context* context) {
-    
+void SmManager::show_index(const std::string& tab_name, Context* context) {
+    TabMeta& tab = db_.get_table(tab_name);
+
+    std::vector<std::string> captions = {"Table", "Index", "Columns"};
+    RecordPrinter printer(captions.size());
+    printer.print_separator(context);
+    printer.print_record(captions, context);
+    printer.print_separator(context);
+
+    std::fstream outfile;
+    outfile.open("output.txt", std::ios::out | std::ios::app);
+
+    for (auto& index : tab.indexes) {
+        // 构建列名字符串，格式为 (col1) 或 (col1, col2)
+        std::string cols_str = "(";
+        for (size_t i = 0; i < index.cols.size(); ++i) {
+            if (i > 0) cols_str += ",";
+            cols_str += index.cols[i].name;
+        }
+        cols_str += ")";
+        // 所有索引均为唯一索引，类型显示为 "unique"
+        std::string idx_type = "unique";
+        printer.print_record({tab_name, idx_type, cols_str}, context);
+        outfile << "| " << tab_name << " | " << idx_type << " | " << cols_str << " |\n";
+    }
+
+    printer.print_separator(context);
+    outfile.close();
 }

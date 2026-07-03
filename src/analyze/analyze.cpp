@@ -18,7 +18,21 @@ See the Mulan PSL v2 for more details. */
 std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
 {
     std::shared_ptr<Query> query = std::make_shared<Query>();
-    if (auto x = std::dynamic_pointer_cast<ast::SelectStmt>(parse))
+    if (auto x = std::dynamic_pointer_cast<ast::ExplainStmt>(parse))
+    {
+        // EXPLAIN SELECT: 解包并标记
+        query->is_explain = true;
+        // 递归分析内部的 SelectStmt
+        auto inner_query = do_analyze(x->select_stmt);
+        query->tables = std::move(inner_query->tables);
+        query->cols = std::move(inner_query->cols);
+        query->conds = std::move(inner_query->conds);
+        query->set_clauses = std::move(inner_query->set_clauses);
+        query->values = std::move(inner_query->values);
+        query->parse = std::move(inner_query->parse);
+        return query;
+    }
+    else if (auto x = std::dynamic_pointer_cast<ast::SelectStmt>(parse))
     {
         // 处理表名
         query->tables = std::move(x->tabs);

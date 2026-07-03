@@ -77,6 +77,10 @@ void QlManager::run_mutli_query(std::shared_ptr<Plan> plan, Context *context){
 
 // 执行help; show tables; desc table; begin; commit; abort;语句
 void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Context *context) {
+    // EXPLAIN 输出已在 Portal::start 中完成，此处无需额外处理
+    if (auto x = std::dynamic_pointer_cast<ExplainPlan>(plan)) {
+        return;
+    }
     if (auto x = std::dynamic_pointer_cast<OtherPlan>(plan)) {
         switch(x->tag) {
             case T_Help:
@@ -93,6 +97,11 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
             case T_DescTable:
             {
                 sm_manager_->desc_table(x->tab_name_, context);
+                break;
+            }
+            case T_ShowIndex:
+            {
+                sm_manager_->show_index(x->tab_name_, context);
                 break;
             }
             case T_Transaction_begin:

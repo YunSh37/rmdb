@@ -26,6 +26,9 @@ void IxScan::next() {
         iid_.slot_no = 0;
         iid_.page_no = node->get_next_leaf();
     }
+    // 释放当前页面的pin，避免缓冲区被耗尽
+    bpm_->unpin_page(node->get_page_id(), false);
+    delete node;
 }
 
 Rid IxScan::rid() const {

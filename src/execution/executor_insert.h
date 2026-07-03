@@ -49,20 +49,48 @@ class InsertExecutor : public AbstractExecutor {
             val.init_raw(col.len);
             memcpy(rec.data + col.offset, val.raw->data, col.len);
         }
-        // Insert into record file
-        rid_ = fh_->insert_record(rec.data, context_);
-        
-        // Insert into index
-        for(size_t i = 0; i < tab_.indexes.size(); ++i) {
+
+        // 唯一索引约束检查：插入前检查所有索引是否有重复键
+        for (size_t i = 0; i < tab_.indexes.size(); ++i) {
             auto& index = tab_.indexes[i];
-            auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols)).get();
+            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
+            // 确保索引已打开
+            if (sm_manager_->ihs_.count(ix_name) == 0) {
+                sm_manager_->ihs_.emplace(ix_name, sm_manager_->get_ix_manager()->open_index(tab_name_, index.cols));
+            }
+            auto ih = sm_manager_->ihs_.at(ix_name).get();
+            // 构建索引键
             char* key = new char[index.col_tot_len];
             int offset = 0;
-            for(size_t i = 0; i < index.col_num; ++i) {
-                memcpy(key + offset, rec.data + index.cols[i].offset, index.cols[i].len);
-                offset += index.cols[i].len;
+            for (int j = 0; j < index.col_num; ++j) {
+                memcpy(key + offset, rec.data + index.cols[j].offset, index.cols[j].len);
+                offset += index.cols[j].len;
+            }
+            // 检查键是否已存在
+            std::vector<Rid> results;
+            if (ih->get_value(key, &results, context_->txn_)) {
+                delete[] key;
+                throw DuplicateKeyError();
+            }
+            delete[] key;
+        }
+
+        // Insert into record file
+        rid_ = fh_->insert_record(rec.data, context_);
+
+        // 维护索引：将新记录插入所有索引
+        for (size_t i = 0; i < tab_.indexes.size(); ++i) {
+            auto& index = tab_.indexes[i];
+            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
+            auto ih = sm_manager_->ihs_.at(ix_name).get();
+            char* key = new char[index.col_tot_len];
+            int offset = 0;
+            for (int j = 0; j < index.col_num; ++j) {
+                memcpy(key + offset, rec.data + index.cols[j].offset, index.cols[j].len);
+                offset += index.cols[j].len;
             }
             ih->insert_entry(key, rid_, context_->txn_);
+            delete[] key;
         }
         return nullptr;
     }

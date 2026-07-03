@@ -97,6 +97,12 @@ struct DescTable : public TreeNode {
     DescTable(std::string tab_name_) : tab_name(std::move(tab_name_)) {}
 };
 
+struct ShowIndexes : public TreeNode {
+    std::string tab_name;
+
+    ShowIndexes(std::string tab_name_) : tab_name(std::move(tab_name_)) {}
+};
+
 struct CreateIndex : public TreeNode {
     std::string tab_name;
     std::vector<std::string> col_names;
@@ -233,6 +239,14 @@ struct SelectStmt : public TreeNode {
             order(std::move(order_)) {
                 has_sort = (bool)order;
             }
+};
+
+// Explain 语句，包装一个 SelectStmt
+struct ExplainStmt : public TreeNode {
+    std::shared_ptr<SelectStmt> select_stmt;
+
+    ExplainStmt(std::shared_ptr<SelectStmt> select_stmt_) :
+            select_stmt(std::move(select_stmt_)) {}
 };
 
 // set enable_nestloop

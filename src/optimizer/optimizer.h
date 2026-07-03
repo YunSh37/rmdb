@@ -41,6 +41,9 @@ class Optimizer {
         } else if (auto x = std::dynamic_pointer_cast<ast::DescTable>(query->parse)) {
             // desc table;
             return std::make_shared<OtherPlan>(T_DescTable, x->tab_name);
+        } else if (auto x = std::dynamic_pointer_cast<ast::ShowIndexes>(query->parse)) {
+            // show index from;
+            return std::make_shared<OtherPlan>(T_ShowIndex, x->tab_name);
         } else if (auto x = std::dynamic_pointer_cast<ast::TxnBegin>(query->parse)) {
             // begin;
             return std::make_shared<OtherPlan>(T_Transaction_begin, std::string());
@@ -57,7 +60,12 @@ class Optimizer {
             // Set Knob Plan
             return std::make_shared<SetKnobPlan>(x->set_knob_type_, x->bool_val_);
         } else {
-            return planner_->do_planner(query, context);
+            auto plan = planner_->do_planner(query, context);
+            // 如果是 EXPLAIN 查询，包装为 ExplainPlan
+            if (query->is_explain) {
+                return std::make_shared<ExplainPlan>(std::move(plan));
+            }
+            return plan;
         }
     }
 

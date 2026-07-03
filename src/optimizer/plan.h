@@ -23,6 +23,7 @@ typedef enum PlanTag{
     T_Invalid = 1,
     T_Help,
     T_ShowTable,
+    T_ShowIndex,
     T_DescTable,
     T_CreateTable,
     T_DropTable,
@@ -42,7 +43,9 @@ typedef enum PlanTag{
     T_NestLoop,
     T_SortMerge,    // sort merge join
     T_Sort,
-    T_Projection
+    T_Projection,
+    T_Explain,
+    T_Filter
 } PlanTag;
 
 // 查询执行计划
@@ -109,11 +112,40 @@ class ProjectionPlan : public Plan
             Plan::tag = tag;
             subplan_ = std::move(subplan);
             sel_cols_ = std::move(sel_cols);
+            is_star_ = false;  // 默认非 * 查询
         }
         ~ProjectionPlan(){}
         std::shared_ptr<Plan> subplan_;
         std::vector<TabCol> sel_cols_;
-        
+        bool is_star_;  // 是否为 SELECT * 查询
+};
+
+// 选择（Filter）节点，用于选择运算下推
+class FilterPlan : public Plan
+{
+    public:
+        FilterPlan(std::shared_ptr<Plan> subplan, std::vector<Condition> conds)
+        {
+            Plan::tag = T_SeqScan;  // 使用 SeqScan tag，实际通过 subplan_ 区分
+            subplan_ = std::move(subplan);
+            conds_ = std::move(conds);
+        }
+        ~FilterPlan(){}
+        std::shared_ptr<Plan> subplan_;
+        std::vector<Condition> conds_;
+};
+
+// EXPLAIN 节点，包装内部计划并输出计划树
+class ExplainPlan : public Plan
+{
+    public:
+        ExplainPlan(std::shared_ptr<Plan> subplan)
+        {
+            Plan::tag = T_Explain;
+            subplan_ = std::move(subplan);
+        }
+        ~ExplainPlan(){}
+        std::shared_ptr<Plan> subplan_;
 };
 
 class SortPlan : public Plan

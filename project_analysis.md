@@ -1,6 +1,6 @@
 # RMDB 项目分析文档
 
-> 最后更新：2026-07-03 | 题目二"查询执行"完成后更新
+> 最后更新：2026-07-03 | 题目三"唯一索引"完成后更新
 
 ## 项目概览
 
@@ -52,8 +52,8 @@ rmdb/
 
 **支持的 SQL 语法**：
 - DDL: `CREATE TABLE`, `DROP TABLE`, `DESC`, `CREATE INDEX`, `DROP INDEX`
-- DML: `INSERT INTO`, `DELETE FROM`, `UPDATE`, `SELECT`
-- 其他: `SHOW TABLES`, `HELP`, `EXIT`, `BEGIN/COMMIT/ABORT/ROLLBACK`
+- DML: `INSERT INTO`, `DELETE FROM`, `UPDATE`, `SELECT`, `EXPLAIN SELECT`
+- 其他: `SHOW TABLES`, `SHOW INDEX FROM`, `HELP`, `EXIT`, `BEGIN/COMMIT/ABORT/ROLLBACK`
 - 表达式: 6 种比较运算符（`=` `<>` `<` `>` `<=` `>=`），AND 连接
 - 数据类型: INT, FLOAT, CHAR(n)
 
@@ -74,13 +74,21 @@ rmdb/
 
 | 文件 | 关键方法 | 说明 |
 |------|----------|------|
-| `optimizer.h` | `plan_query()` | 优化入口，路由到 planner |
+| `optimizer.h` | `plan_query()` | 优化入口，路由到 planner；EXPLAIN 查询额外包装 ExplainPlan |
 | `planner.h/cpp` | `do_planner()` | 根据 AST 类型生成 Plan |
-| | `generate_select_plan()` | SELECT 计划生成（含投影优化） |
-| | `make_one_rel()` | 单表/多表 JOIN 计划 |
-| `plan.h` | `ScanPlan`, `JoinPlan`, `ProjectionPlan`, `SortPlan`, `DMLPlan`, `DDLPlan`, `OtherPlan` | 计划节点类型定义 |
+| | `generate_select_plan()` | SELECT 计划生成（含顶层投影，检测 SELECT *） |
+| | `make_one_rel()` | 多表 JOIN 计划（选择下推、投影下推、连接顺序优化） |
+| `plan.h` | `ScanPlan`, `JoinPlan`, `ProjectionPlan`, `FilterPlan`, `ExplainPlan`, `SortPlan`, `DMLPlan`, `DDLPlan`, `OtherPlan` | 计划节点类型定义 |
 
-**执行计划类型 (PlanTag)**：T_SeqScan, T_IndexScan, T_NestLoop, T_SortMerge, T_Projection, T_Sort, T_Insert, T_Update, T_Delete, T_select 等。
+**新增计划类型**：
+- `FilterPlan`：选择下推节点，包装单表过滤条件（仅用于 EXPLAIN 显示）
+- `ExplainPlan`：EXPLAIN 包装节点，Portal 检测后打印计划树而非执行
+- `ProjectionPlan::is_star_`：标记 SELECT * 查询
+
+**优化规则**：
+- **选择下推**：过滤条件（`is_rhs_val`）按表分离，包装为 FilterPlan
+- **投影下推**：多表 JOIN 时，每个 Scan 分支只保留需要的列（SELECT + JOIN + WHERE 涉及的列）
+- **连接顺序优化**：按表估计大小（`num_pages × num_records_per_page`）升序排列，小表优先作为左子树
 
 ### 4. Execution 模块（`src/execution/`）
 
@@ -90,8 +98,8 @@ rmdb/
 |------|-----|------|
 | `executor_abstract.h` | `AbstractExecutor` | 执行器基类 |
 | `executor_seq_scan.h` | `SeqScanExecutor` | 全表扫描 + 条件过滤 |
-| `executor_index_scan.h` | `IndexScanExecutor` | 索引扫描（TODO） |
-| `executor_insert.h` | `InsertExecutor` | 插入记录 + 索引维护 |
+| `executor_index_scan.h` | `IndexScanExecutor` | 索引扫描 + 条件过滤 + 回表 |
+| `executor_insert.h` | `InsertExecutor` | 插入记录 + 索引维护 + 唯一性检查 |
 | `executor_update.h` | `UpdateExecutor` | 更新记录 |
 | `executor_delete.h` | `DeleteExecutor` | 删除记录 |
 | `executor_projection.h` | `ProjectionExecutor` | 列投影 |
@@ -114,8 +122,8 @@ rmdb/
 |------|----------|------|
 | `sm_manager.h/cpp` | `create_db/drop_db/open_db/close_db` | 数据库生命周期管理 |
 | | `create_table/drop_table` | 表管理 |
-| | `show_tables/desc_table` | 元数据查询 |
-| | `create_index/drop_index` | 索引管理（TODO） |
+| | `show_tables/desc_table/show_index` | 元数据查询 |
+| | `create_index/drop_index` | 索引管理（含全表扫描构建索引） |
 | `sm_meta.h` | `DbMeta`, `TabMeta`, `ColMeta`, `IndexMeta` | 三层元数据结构 |
 | `sm_defs.h` | `ColDef` | 列定义结构体 |
 
@@ -174,9 +182,36 @@ rmdb/
 
 ### 9. Index 模块（`src/index/`）
 
-**职责**：B+树索引实现。
+**职责**：B+树唯一索引实现，支持索引创建/删除/查询/维护。
 
-**当前状态**：框架完整，核心方法（lower_bound、upper_bound、insert_entry、delete_entry、split、coalesce 等）为 TODO 桩代码（题目二中不涉及）。
+| 文件 | 关键方法 | 说明 |
+|------|----------|------|
+| `ix_defs.h` | `IxFileHdr`, `IxPageHdr`, `Iid` | 索引文件头、页面头、索引槽标识 |
+| `ix_index_handle.h/cpp` | `IxNodeHandle`, `IxIndexHandle` | B+树核心实现 |
+| | `lower_bound/upper_bound` | 二分查找定位 ≥/＞ key 的索引槽 |
+| | `leaf_lookup/internal_lookup` | 叶节点/内部节点查找 |
+| | `insert/insert_entry` | 插入键值对（含重复键检查） |
+| | `delete_entry/remove` | 删除键值对 |
+| | `split/insert_into_parent` | 节点分裂 |
+| | `coalesce_or_redistribute/coalesce/redistribute` | 合并与重分配 |
+| | `adjust_root` | 根节点调整 |
+| | `get_value` | 精确查找键值对 |
+| `ix_manager.h` | `IxManager` | 索引文件生命周期管理 |
+| | `create_index/destroy_index` | 创建/销毁索引文件 |
+| | `open_index/close_index` | 打开/关闭索引文件 |
+| `ix_scan.h/cpp` | `IxScan` | 索引扫描迭代器（遍历叶子链表） |
+| `ix.h` | — | 聚合头文件 |
+
+**B+树页面结构**：
+- **页面 0**（文件头）：`IxFileHdr`（root_page, first_leaf, last_leaf, col_types/lens, btree_order）
+- **页面 1**（叶子链表头）：哨兵节点，prev_leaf/next_leaf 指向根节点
+- **页面 2**（根节点）：B+树的根，初始为叶子节点
+- **页面 3+**（数据节点）：`[IxPageHdr:24B][keys][rids]`
+
+**唯一索引实现**：
+- 插入/更新时，在应用层（`InsertExecutor`/`UpdateExecutor`）通过 `get_value()` 检查键是否重复
+- 重复时抛出 `DuplicateKeyError`，被 `rmdb.cpp` 捕获后将 "failure" 写入 `output.txt`
+- `IxNodeHandle::insert()` 底层也有重复键检测（静默忽略，不抛异常）
 
 ### 10. Transaction 模块（`src/transaction/`）
 
@@ -226,19 +261,19 @@ rmdb/
   输出到客户端 + output.txt
 ```
 
-## 实现状态（题目二完成后）
+## 实现状态（题目四完成后）
 
 | 模块 | 状态 | 备注 |
 |------|------|------|
-| Parser | ✅ 完整 | 所有 SQL 语法支持 |
-| Analyze | ✅ 完整 | 含表/列存在性检查、UpdateStmt 处理 |
-| Optimizer | ✅ 可用 | 单表查询完整，JOIN/逻辑优化 TODO |
-| Execution | ✅ 可用 | SeqScan/Projection/Insert/Update/Delete 完整 |
-| System | ✅ 可用 | create_table/drop_table 完整，索引管理 TODO |
+| Parser | ✅ 完整 | 所有 SQL 语法支持，含 EXPLAIN、CREATE/DROP INDEX、SHOW INDEX |
+| Analyze | ✅ 完整 | 含 ExplainStmt 解包、表/列存在性检查、UpdateStmt 处理 |
+| Optimizer | ✅ 可用 | 选择下推（FilterPlan）、投影下推（ProjectionPlan）、连接顺序优化（按表大小）、EXPLAIN 计划打印 |
+| Execution | ✅ 可用 | SeqScan/IndexScan/Projection/Insert/Update/Delete 完整，含索引维护，NestedLoopJoin TODO |
+| System | ✅ 可用 | create_table/drop_table/create_index/drop_index/show_index 完整 |
 | Record | ✅ 完整 | CRUD + RmScan 完整 |
 | Storage | ✅ 完整 | DiskManager + BufferPoolManager 完整 |
 | Replacer | ✅ 完整 | LRU 淘汰策略 |
-| Index | ⚠️ 桩代码 | B+树核心方法 TODO |
+| Index | ✅ 完整 | B+树唯一索引，含 split/coalesce/redistribute/adjust_root |
 | Transaction | ✅ 基本可用 | begin/commit/abort 完整，锁管理 TODO |
 | Recovery | ⚠️ 部分 | WAL 日志读写部分 TODO |
 | Server/Client | ✅ 完整 | TCP 通信、多线程连接处理 |
