@@ -90,6 +90,7 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "ASC" { return ASC; }
 "ENABLE_NESTLOOP" { return ENABLE_NESTLOOP; }
 "ENABLE_SORTMERGE" { return ENABLE_SORTMERGE; }
+"STATIC_CHECKPOINT" { return STATIC_CHECKPOINT; }
 "MAX"       { return MAX; }
 "MIN"       { return MIN; }
 "COUNT"     { return COUNT; }

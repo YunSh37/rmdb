@@ -33,7 +33,13 @@ public:
 
     /** 获取下一个时间戳（原子操作，线程安全） */
     timestamp_t get_next_timestamp() { return next_timestamp_.fetch_add(1); }
-    
+
+    /** 恢复时设置事务ID（crash后恢复避免与已恢复数据冲突） */
+    void set_next_txn_id(txn_id_t txn_id) { next_txn_id_.store(txn_id); }
+
+    /** 恢复时设置时间戳（crash后恢复避免MVCC可见性错误） */
+    void set_next_timestamp(timestamp_t ts) { next_timestamp_.store(ts); }
+
     ~TransactionManager() = default;
 
     Transaction* begin(Transaction* txn, LogManager* log_manager);

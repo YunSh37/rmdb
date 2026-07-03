@@ -305,6 +305,29 @@ int main(int argc, char **argv) {
         recovery->analyze();
         recovery->redo();
         recovery->undo();
+
+        // 恢复事务ID和时间戳（避免crash后时间戳重置导致MVCC可见性错误）
+        txn_id_t max_txn_id = recovery->get_max_txn_id();
+        if (max_txn_id != INVALID_TXN_ID) {
+            txn_manager->set_next_txn_id(max_txn_id + 1);
+            txn_manager->set_next_timestamp(max_txn_id + 1);
+            printf("[Recovery] 恢复时间戳: txn_id/timestamp从 %d 开始\n",
+                   max_txn_id + 1);
+        }
+
+        // 恢复后重建所有索引（crash后索引页可能丢失，需从数据表重建）
+        sm_manager->rebuild_all_indexes();
+
+        // 恢复完成后截断日志文件（避免LSN冲突，为新日志腾出空间）
+        // 关闭旧日志文件，删除它，然后创建新的空日志文件
+        if (disk_manager->GetLogFd() != -1) {
+            disk_manager->close_file(disk_manager->GetLogFd());
+            disk_manager->SetLogFd(-1);  // 重置log_fd_，确保下次write_log时重新打开
+        }
+        if (disk_manager->is_file(LOG_FILE_NAME)) {
+            disk_manager->destroy_file(LOG_FILE_NAME);
+        }
+        disk_manager->create_file(LOG_FILE_NAME);
         
         // 开启服务端，开始接受客户端连接
         start_server();

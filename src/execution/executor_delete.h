@@ -50,10 +50,23 @@ class DeleteExecutor : public AbstractExecutor {
                 context_->lock_mgr_->lock_exclusive_on_record(context_->txn_, rid, fh_->GetFd());
             }
 
-            // 删除前读取记录，保存到 WriteRecord（用于事务回滚）
+            // 删除前读取记录（用于WAL日志和事务回滚）
             // get_record 返回完整slot（用户数据+MVCC头）
             auto rec = fh_->get_record(rid, context_);
-            if (context_->txn_ != nullptr) {
+
+            // WAL日志：记录DELETE操作（用于故障恢复REDO/UNDO）
+            if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
+                DeleteLogRecord* log_rec = new DeleteLogRecord(context_->txn_->get_transaction_id(), tab_name_, *rec, rid);
+                log_rec->prev_lsn_ = context_->txn_->get_prev_lsn();
+                lsn_t lsn = context_->log_mgr_->add_log_to_buffer(log_rec);
+                context_->txn_->set_prev_lsn(lsn);
+                delete log_rec;
+
+                // 记录写操作（用于事务回滚）
+                auto wr = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec);
+                context_->txn_->append_write_record(wr);
+            } else if (context_->txn_ != nullptr) {
+                // 无日志管理器时，仅记录写操作（用于事务回滚）
                 auto wr = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec);
                 context_->txn_->append_write_record(wr);
             }
@@ -83,6 +96,13 @@ class DeleteExecutor : public AbstractExecutor {
             } else {
                 // 无事务上下文，执行物理删除
                 fh_->delete_record(rid, context_);
+            }
+
+            // 设置页面LSN（WAL）
+            if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
+                auto page_handle = fh_->fetch_page_handle(rid.page_no);
+                page_handle.page->set_page_lsn(context_->txn_->get_prev_lsn());
+                sm_manager_->get_bpm()->unpin_page(page_handle.page->get_page_id(), true);
             }
         }
         return nullptr;

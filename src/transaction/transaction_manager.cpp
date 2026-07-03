@@ -148,6 +148,15 @@ Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manage
     std::unique_lock<std::mutex> lock(latch_);
     TransactionManager::txn_map[txn->get_transaction_id()] = txn;
     lock.unlock();
+
+    // WAL日志：记录事务BEGIN
+    if (log_manager != nullptr) {
+        BeginLogRecord* log_rec = new BeginLogRecord(txn->get_transaction_id());
+        lsn_t lsn = log_manager->add_log_to_buffer(log_rec);
+        txn->set_prev_lsn(lsn);
+        delete log_rec;
+    }
+
     // 4. 返回当前事务指针
     return txn;
 }
@@ -158,6 +167,15 @@ Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manage
  * @param {LogManager*} log_manager 日志管理器指针
  */
 void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
+    // WAL日志：记录事务COMMIT（在释放锁之前写日志，确保持久化）
+    if (log_manager != nullptr) {
+        CommitLogRecord* log_rec = new CommitLogRecord(txn->get_transaction_id());
+        log_rec->prev_lsn_ = txn->get_prev_lsn();
+        log_manager->add_log_to_buffer(log_rec);
+        log_manager->flush_log_to_disk();  // COMMIT日志必须立即刷盘
+        delete log_rec;
+    }
+
     // 1. 清空写操作集合（已提交，无需回滚）
     auto write_set = txn->get_write_set();
     while (!write_set->empty()) {
@@ -186,6 +204,14 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
  * @param {LogManager} *log_manager 日志管理器指针
  */
 void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
+    // WAL日志：记录事务ABORT（在undo之前写日志）
+    if (log_manager != nullptr) {
+        AbortLogRecord* log_rec = new AbortLogRecord(txn->get_transaction_id());
+        log_rec->prev_lsn_ = txn->get_prev_lsn();
+        log_manager->add_log_to_buffer(log_rec);
+        delete log_rec;
+    }
+
     // 1. 逆序遍历 write_set，撤销所有修改
     auto write_set = txn->get_write_set();
     while (!write_set->empty()) {
@@ -209,6 +235,11 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
                 break;
         }
         delete wr;
+    }
+
+    // 刷盘ABORT日志
+    if (log_manager != nullptr) {
+        log_manager->flush_log_to_disk();
     }
 
     // 2. 释放所有锁（遍历lock_set逐一unlock）

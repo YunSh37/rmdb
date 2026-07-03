@@ -101,6 +101,27 @@ class InsertExecutor : public AbstractExecutor {
         // Insert into record file（rec.data包含用户数据+MVCC头）
         rid_ = fh_->insert_record(rec.data, context_);
 
+        // WAL日志：记录INSERT操作（用于故障恢复REDO/UNDO）
+        if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
+            InsertLogRecord* log_rec = new InsertLogRecord(context_->txn_->get_transaction_id(), rec, rid_, tab_name_);
+            log_rec->prev_lsn_ = context_->txn_->get_prev_lsn();
+            lsn_t lsn = context_->log_mgr_->add_log_to_buffer(log_rec);
+            context_->txn_->set_prev_lsn(lsn);
+
+            // 设置页面LSN
+            auto page_handle = fh_->fetch_page_handle(rid_.page_no);
+            page_handle.page->set_page_lsn(lsn);
+            sm_manager_->get_bpm()->unpin_page(page_handle.page->get_page_id(), true);
+
+            // 将日志记录加入write_set（abort时需要通过日志undo）
+            context_->txn_->append_write_record(new WriteRecord(WType::INSERT_TUPLE, tab_name_, rid_));
+            delete log_rec;
+        } else if (context_->txn_ != nullptr) {
+            // 无日志管理器时，仅记录写操作（用于事务回滚）
+            auto wr = new WriteRecord(WType::INSERT_TUPLE, tab_name_, rid_);
+            context_->txn_->append_write_record(wr);
+        }
+
         // 维护索引：将新记录插入所有索引
         for (size_t i = 0; i < tab_.indexes.size(); ++i) {
             auto& index = tab_.indexes[i];
@@ -119,12 +140,6 @@ class InsertExecutor : public AbstractExecutor {
         // 获取行级X锁（排他锁）——仅显式事务需要加锁
         if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
             context_->lock_mgr_->lock_exclusive_on_record(context_->txn_, rid_, fh_->GetFd());
-        }
-
-        // 记录写操作（用于事务回滚）
-        if (context_->txn_ != nullptr) {
-            auto wr = new WriteRecord(WType::INSERT_TUPLE, tab_name_, rid_);
-            context_->txn_->append_write_record(wr);
         }
 
         return nullptr;

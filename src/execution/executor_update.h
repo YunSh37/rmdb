@@ -65,11 +65,8 @@ class UpdateExecutor : public AbstractExecutor {
             // 1. 读取当前记录（包含用户数据+MVCC头）
             auto rec = fh_->get_record(rid, context_);
 
-            // 保存旧记录到 WriteRecord（用于事务回滚，包含旧MVCC头）
-            if (context_->txn_ != nullptr) {
-                auto wr = new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, *rec);
-                context_->txn_->append_write_record(wr);
-            }
+            // 保存旧记录副本（用于WAL日志和事务回滚）
+            RmRecord old_rec(*rec);  // 深拷贝旧记录
 
             // 2. 如果有索引，先记录旧键（用于后续删除）
             std::vector<std::string> old_keys;  // 每个索引的旧键
@@ -116,6 +113,24 @@ class UpdateExecutor : public AbstractExecutor {
                 MvccHeader* mvcc_hdr = reinterpret_cast<MvccHeader*>(rec->data + user_size);
                 mvcc_hdr->xmin_ = context_->txn_->get_start_ts();
                 // xmax保持不变（通常为INT32_MAX）
+            }
+
+            // WAL日志：记录UPDATE操作（含新旧记录，用于REDO/UNDO）
+            if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
+                UpdateLogRecord* log_rec = new UpdateLogRecord(context_->txn_->get_transaction_id(), tab_name_,
+                                                               old_rec, *rec, rid);
+                log_rec->prev_lsn_ = context_->txn_->get_prev_lsn();
+                lsn_t lsn = context_->log_mgr_->add_log_to_buffer(log_rec);
+                context_->txn_->set_prev_lsn(lsn);
+                delete log_rec;
+
+                // 记录写操作（用于事务回滚）
+                auto wr = new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, old_rec);
+                context_->txn_->append_write_record(wr);
+            } else if (context_->txn_ != nullptr) {
+                // 无日志管理器时，仅记录写操作（用于事务回滚）
+                auto wr = new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, old_rec);
+                context_->txn_->append_write_record(wr);
             }
 
             // 4. 维护索引：删除旧键，检查新键唯一性，插入新键
@@ -166,6 +181,13 @@ class UpdateExecutor : public AbstractExecutor {
 
             // 5. 写回修改后的记录（包含用户数据+更新后的MVCC头）
             fh_->update_record(rid, rec->data, context_);
+
+            // 设置页面LSN（WAL）
+            if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
+                auto page_handle = fh_->fetch_page_handle(rid.page_no);
+                page_handle.page->set_page_lsn(context_->txn_->get_prev_lsn());
+                sm_manager_->get_bpm()->unpin_page(page_handle.page->get_page_id(), true);
+            }
         }
         return nullptr;
     }

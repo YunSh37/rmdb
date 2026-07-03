@@ -66,6 +66,10 @@ struct TxnAbort : public TreeNode {
 struct TxnRollback : public TreeNode {
 };
 
+/** 静态检查点语句 */
+struct CheckpointStmt : public TreeNode {
+};
+
 struct TypeLen : public TreeNode {
     SvType type;
     int len;

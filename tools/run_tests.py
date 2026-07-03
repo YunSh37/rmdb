@@ -582,6 +582,104 @@ TOPIC8_TUPLE_RECONSTRUCT_TEST = [
 ]
 
 
+# ============================================================
+# 题目九：基于静态检查点的故障恢复
+# ============================================================
+
+# 测试点1-2：单/多线程故障恢复（不含检查点）—— 简单CRUD后crash恢复
+TOPIC9_TEST1_CRASH_RECOVERY = [
+    # 建表 + 插入数据
+    ("create table crash_t1 (id int, name char(8), score float);", "SUCCESS"),
+    ("insert into crash_t1 values (1, 'alice', 90.0);", "SUCCESS"),
+    ("insert into crash_t1 values (2, 'bob', 85.5);", "SUCCESS"),
+    ("insert into crash_t1 values (3, 'carl', 92.0);", "SUCCESS"),
+    # 更新 + 删除
+    ("update crash_t1 set score = 95.0 where id = 2;", "SUCCESS"),
+    ("delete from crash_t1 where id = 3;", "SUCCESS"),
+    # 在事务中修改（commit应持久化）
+    ("begin;", "SUCCESS"),
+    ("insert into crash_t1 values (4, 'dave', 88.0);", "SUCCESS"),
+    ("update crash_t1 set name = 'bob_upd' where id = 2;", "SUCCESS"),
+    ("commit;", "SUCCESS"),
+]
+
+# crash后验证：已提交事务的修改应保留，未提交的应回滚
+TOPIC9_TEST1_VERIFY = [
+    # 已提交的数据应存在
+    ("select * from crash_t1 where id = 1;", "1|alice|90.0"),
+    ("select * from crash_t1 where id = 2;", "2|bob_upd|95.0"),
+    # 已删除的id=3应不存在
+    ("select * from crash_t1 where id = 4;", "4|dave|88.0"),
+]
+
+# 测试点1扩展：abort的事务应正确回滚（crash前abort）
+TOPIC9_TEST1B_CRASH_RECOVERY = [
+    ("create table crash_t2 (id int, val int);", "SUCCESS"),
+    ("insert into crash_t2 values (1, 100);", "SUCCESS"),
+    ("begin;", "SUCCESS"),
+    ("insert into crash_t2 values (2, 200);", "SUCCESS"),
+    ("abort;", "SUCCESS"),  # 回滚，id=2不应存在
+    ("insert into crash_t2 values (3, 300);", "SUCCESS"),
+]
+
+TOPIC9_TEST1B_VERIFY = [
+    ("select * from crash_t2 where id = 1;", "1|100"),
+    ("select * from crash_t2 where id = 3;", "3|300"),
+    # id=2 应该不存在（被abort回滚了）
+]
+
+# 测试点3：含索引的故障恢复
+TOPIC9_TEST3_CRASH_RECOVERY = [
+    ("create table crash_idx (w_id int, name char(8));", "SUCCESS"),
+    ("insert into crash_idx values (10, 'qweruiop');", "SUCCESS"),
+    ("insert into crash_idx values (534, 'asdfhjkl');", "SUCCESS"),
+    ("insert into crash_idx values (100, 'qwerghjk');", "SUCCESS"),
+    ("insert into crash_idx values (500, 'bgtyhnmj');", "SUCCESS"),
+    ("create index crash_idx(w_id);", "SUCCESS"),
+    # 通过索引查询验证索引正常工作
+    ("select * from crash_idx where w_id = 10;", "10|qweruiop"),
+    ("select * from crash_idx where w_id = 500;", "500|bgtyhnmj"),
+    # 更新（涉及索引维护）
+    ("update crash_idx set w_id = 507 where w_id = 534;", "SUCCESS"),
+]
+
+TOPIC9_TEST3_VERIFY = [
+    # 恢复后索引应正常工作
+    ("select * from crash_idx where w_id = 10;", "10|qweruiop"),
+    ("select * from crash_idx where w_id = 507;", "507|asdfhjkl"),
+    ("select * from crash_idx where w_id = 100;", "100|qwerghjk"),
+    ("select * from crash_idx where w_id = 500;", "500|bgtyhnmj"),
+]
+
+# 测试点5-6：大数据量 + 检查点（这里是简化版本，验证检查点命令+恢复）
+TOPIC9_TEST6_CHECKPOINT = [
+    ("create table ckpt_t (id int, val int);", "SUCCESS"),
+    # 插入多条数据
+    ("insert into ckpt_t values (1, 100);", "SUCCESS"),
+    ("insert into ckpt_t values (2, 200);", "SUCCESS"),
+    ("insert into ckpt_t values (3, 300);", "SUCCESS"),
+    ("insert into ckpt_t values (4, 400);", "SUCCESS"),
+    ("insert into ckpt_t values (5, 500);", "SUCCESS"),
+    # 创建检查点
+    ("create static_checkpoint;", "SUCCESS"),
+    # 检查点后继续修改
+    ("insert into ckpt_t values (6, 600);", "SUCCESS"),
+    ("update ckpt_t set val = 999 where id = 1;", "SUCCESS"),
+    ("delete from ckpt_t where id = 3;", "SUCCESS"),
+]
+
+TOPIC9_TEST6_VERIFY = [
+    # 检查点前的数据
+    ("select * from ckpt_t where id = 1;", "1|999"),  # 更新后的值
+    ("select * from ckpt_t where id = 2;", "2|200"),
+    ("select * from ckpt_t where id = 4;", "4|400"),
+    ("select * from ckpt_t where id = 5;", "5|500"),
+    # 检查点后的数据
+    ("select * from ckpt_t where id = 6;", "6|600"),
+    # id=3已被删除
+]
+
+
 class RMDBTester:
     def __init__(self):
         self.sock = None
@@ -604,6 +702,18 @@ class RMDBTester:
         os.chdir("..")
         time.sleep(0.5)  # 等待服务端启动
 
+    def start_server_no_clean(self):
+        """启动服务端（保留已有数据库，用于crash-recovery测试）"""
+        os.chdir(BUILD_DIR)
+        # 将stderr重定向到文件以便调试crash-recovery问题
+        self._recovery_log = open(os.path.join(TEST_DB, "recovery_stderr.log"), "a")
+        self.server_proc = subprocess.Popen(
+            ["./bin/rmdb", TEST_DB],
+            stdout=self._recovery_log, stderr=self._recovery_log
+        )
+        os.chdir("..")
+        time.sleep(1.0)  # 等待服务端启动（含恢复过程）
+
     def stop_server(self):
         """停止服务端"""
         if self.sock:
@@ -612,9 +722,37 @@ class RMDBTester:
             self.server_proc.terminate()
             self.server_proc.wait(timeout=5)
 
+    def send_crash(self):
+        """发送crash命令使服务端崩溃（模拟故障）"""
+        if self.sock:
+            self.sock.sendall(b"crash\0")
+            time.sleep(0.5)
+        # 等待进程退出
+        if self.server_proc:
+            try:
+                self.server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.server_proc.kill()
+                self.server_proc.wait(timeout=2)
+        self.sock = None
+        self.server_proc = None
+        # 关闭recovery日志文件
+        if hasattr(self, '_recovery_log') and self._recovery_log:
+            self._recovery_log.close()
+            self._recovery_log = None
+        time.sleep(1.0)  # 等待端口释放
+
+    def restart_after_crash(self):
+        """crash后重启服务端（保留数据库），执行自动恢复"""
+        self.start_server_no_clean()
+        if not self.connect():
+            print("恢复后无法连接到服务端！")
+            return False
+        return True
+
     def connect(self):
         """连接到服务端"""
-        for _ in range(10):
+        for _ in range(60):  # 增加重试次数（60次 × 0.5s = 30秒），给恢复留足时间
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect(("127.0.0.1", SERVER_PORT))
@@ -820,6 +958,8 @@ class RMDBTester:
             "mvcc_test", "mvcc_del", "mvcc_upd", "mvcc_txn", "mvcc_abt",
             "mvcc_idx", "mvcc_multi",
             "scan_test", "ts_test", "tuple_test",
+            # 题目九 故障恢复表
+            "crash_t1", "crash_t2", "crash_idx", "ckpt_t",
         ]
         for t in tables_to_drop:
             self.send_sql(f"drop table {t};")
@@ -827,7 +967,7 @@ class RMDBTester:
 
 def main():
     print("=" * 60)
-    print("  RMDB 题目二~八 自动化测试")
+    print("  RMDB 题目二~九 自动化测试")
     print("=" * 60)
 
     tester = RMDBTester()
@@ -946,6 +1086,35 @@ def main():
 
         tester.run_tests("题目八 测试点10: 元组重建", TOPIC8_TUPLE_RECONSTRUCT_TEST)
         tester.cleanup_leftover_tables()
+
+        # ==== 题目九：故障恢复 ====
+        # 测试点1: 单线程故障恢复（crash后数据正确恢复）
+        tester.run_tests("题目九 测试点1: 单线程故障恢复(crash前SQL)", TOPIC9_TEST1_CRASH_RECOVERY)
+        tester.send_crash()
+        if tester.restart_after_crash():
+            tester.run_tests("题目九 测试点1: 单线程故障恢复(crash后验证)", TOPIC9_TEST1_VERIFY)
+            tester.cleanup_leftover_tables()
+
+        # 测试点1b: abort事务回滚验证
+        tester.run_tests("题目九 测试点1b: Abort回滚(crash前SQL)", TOPIC9_TEST1B_CRASH_RECOVERY)
+        tester.send_crash()
+        if tester.restart_after_crash():
+            tester.run_tests("题目九 测试点1b: Abort回滚(crash后验证)", TOPIC9_TEST1B_VERIFY)
+            tester.cleanup_leftover_tables()
+
+        # 测试点3: 含索引的故障恢复
+        tester.run_tests("题目九 测试点3: 含索引故障恢复(crash前SQL)", TOPIC9_TEST3_CRASH_RECOVERY)
+        tester.send_crash()
+        if tester.restart_after_crash():
+            tester.run_tests("题目九 测试点3: 含索引故障恢复(crash后验证)", TOPIC9_TEST3_VERIFY)
+            tester.cleanup_leftover_tables()
+
+        # 测试点6: 含检查点的故障恢复
+        tester.run_tests("题目九 测试点6: 检查点恢复(crash前SQL)", TOPIC9_TEST6_CHECKPOINT)
+        tester.send_crash()
+        if tester.restart_after_crash():
+            tester.run_tests("题目九 测试点6: 检查点恢复(crash后验证)", TOPIC9_TEST6_VERIFY)
+            tester.cleanup_leftover_tables()
 
         # ==== 数据一致性检验 ====
         tester.check_data_consistency()

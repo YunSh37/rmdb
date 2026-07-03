@@ -65,6 +65,15 @@ class RmFileHandle {
     RmFileHdr get_file_hdr() { return file_hdr_; }
     int GetFd() { return fd_; }
 
+    /** 更新文件头的num_pages并立即写回磁盘（用于恢复时扩展文件后同步元数据） */
+    void update_num_pages(int num_pages) {
+        if (num_pages > file_hdr_.num_pages) {
+            file_hdr_.num_pages = num_pages;
+            disk_manager_->write_page(fd_, RM_FILE_HDR_PAGE, (char*)&file_hdr_, sizeof(file_hdr_));
+            disk_manager_->set_fd2pageno(fd_, num_pages);
+        }
+    }
+
     /** 获取用户数据大小（不含MVCC头） */
     int get_user_record_size() const { return file_hdr_.record_size - MVCC_HEADER_SIZE; }
 

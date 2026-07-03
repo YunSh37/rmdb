@@ -228,12 +228,35 @@ rmdb/
 
 ### 11. Recovery 模块（`src/recovery/`）
 
-**职责**：WAL 日志和故障恢复。
+**职责**：WAL 日志和故障恢复（ARIES算法）。
 
 | 文件 | 说明 |
 |------|------|
-| `log_manager.h/cpp` | WAL 日志读写（部分 TODO） |
-| `log_recovery.h/cpp` | 恢复流程（analyze/redo/undo）（部分 TODO） |
+| `log_defs.h` | 日志记录头部偏移常量、序列化偏移定义 |
+| `log_manager.h/cpp` | WAL日志管理器：7种日志类型（Begin/Commit/Abort/Insert/Delete/Update/Checkpoint）、LogBuffer、LogManager（add_log_to_buffer/flush_log_to_disk） |
+| `log_recovery.h/cpp` | ARIES三阶段恢复：analyze（构建ATT+DPT）→ redo（历史重做）→ undo（回滚loser事务）；支持检查点加速恢复 |
+
+**日志记录类型**：
+| 类型 | 包含数据 | 用途 |
+|------|----------|------|
+| BeginLogRecord | txn_id | 标记事务开始 |
+| CommitLogRecord | txn_id | 标记事务已提交 |
+| AbortLogRecord | txn_id | 标记事务已回滚 |
+| InsertLogRecord | table_name, record(含MVCC头), rid | REDO重放插入、UNDO回滚删除 |
+| DeleteLogRecord | table_name, old_record(含MVCC头), rid | REDO重放删除、UNDO恢复记录 |
+| UpdateLogRecord | table_name, old_record, new_record, rid | REDO重放更新、UNDO恢复旧值 |
+| CheckpointLogRecord | ATT快照、DPT快照 | 缩短恢复时间 |
+
+**恢复流程**（`rmdb.cpp`启动时自动执行）：
+1. `analyze()`: 扫描日志 → 构建ATT + DPT + aborted_txns → 确定redo_lsn
+2. `redo()`: 从redo_lsn开始重放所有操作（跳过已中止事务），页面LSN ≥ 日志LSN则跳过
+3. `undo()`: 回滚ATT中所有未完成事务（沿prev_lsn链逆向）
+4. 截断旧日志文件，创建新日志文件
+
+**检查点**（`create static_checkpoint`）：
+- 刷盘所有脏页
+- 记录当前ATT和DPT快照
+- 恢复时从检查点LSN开始（跳过早于检查点的日志）
 
 ### 12. Common 模块（`src/common/`）
 
@@ -276,6 +299,6 @@ rmdb/
 | Storage | ✅ 完整 | DiskManager + BufferPoolManager 完整 |
 | Replacer | ✅ 完整 | LRU 淘汰策略 |
 | Index | ✅ 完整 | B+树唯一索引，含 split/coalesce/redistribute/adjust_root |
-| Transaction | ✅ 基本可用 | begin/commit/abort 完整，锁管理 TODO |
-| Recovery | ⚠️ 部分 | WAL 日志读写部分 TODO |
+| Transaction | ✅ 完整 | begin/commit/abort + MVCC + 2PL 锁管理 + WAL日志 |
+| Recovery | ✅ 完整 | ARIES三阶段恢复 + 7种日志类型 + 静态检查点 |
 | Server/Client | ✅ 完整 | TCP 通信、多线程连接处理 |

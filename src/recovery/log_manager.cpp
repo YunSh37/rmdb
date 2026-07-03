@@ -17,12 +17,45 @@ See the Mulan PSL v2 for more details. */
  * @return {lsn_t} 返回该日志的日志记录号
  */
 lsn_t LogManager::add_log_to_buffer(LogRecord* log_record) {
-  
+    std::unique_lock<std::mutex> lock(latch_);
+
+    // 1. 分配LSN
+    lsn_t lsn = global_lsn_.fetch_add(1);
+    log_record->lsn_ = lsn;
+
+    // 2. 序列化日志记录到临时buffer
+    int log_len = log_record->log_tot_len_;
+    char* serialized = new char[log_len];
+    log_record->serialize(serialized);
+
+    // 3. 若缓冲区空间不足，先刷盘
+    if (log_buffer_.is_full(log_len)) {
+        flush_log_to_disk();
+    }
+
+    // 4. 拷贝到日志缓冲区
+    memcpy(log_buffer_.buffer_ + log_buffer_.offset_, serialized, log_len);
+    log_buffer_.offset_ += log_len;
+
+    delete[] serialized;
+    return lsn;
 }
 
 /**
  * @description: 把日志缓冲区的内容刷到磁盘中，由于目前只设置了一个缓冲区，因此需要阻塞其他日志操作
  */
 void LogManager::flush_log_to_disk() {
+    if (log_buffer_.offset_ == 0) {
+        return;  // 缓冲区为空，无需刷盘
+    }
 
+    // 写入磁盘
+    disk_manager_->write_log(log_buffer_.buffer_, log_buffer_.offset_);
+
+    // 更新持久化LSN（当前global_lsn_-1即是最后一条写入的日志）
+    persist_lsn_ = global_lsn_.load() - 1;
+
+    // 重置缓冲区
+    log_buffer_.offset_ = 0;
+    memset(log_buffer_.buffer_, 0, LOG_BUFFER_SIZE + 1);
 }

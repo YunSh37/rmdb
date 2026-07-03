@@ -59,6 +59,9 @@ class Optimizer {
         } else if (auto x = std::dynamic_pointer_cast<ast::SetStmt>(query->parse)) {
             // Set Knob Plan
             return std::make_shared<SetKnobPlan>(x->set_knob_type_, x->bool_val_);
+        } else if (auto x = std::dynamic_pointer_cast<ast::CheckpointStmt>(query->parse)) {
+            // create static_checkpoint
+            return std::make_shared<OtherPlan>(T_Checkpoint, std::string());
         } else {
             auto plan = planner_->do_planner(query, context);
             // 如果是 EXPLAIN 查询，包装为 ExplainPlan，同时传递别名映射

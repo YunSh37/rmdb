@@ -374,3 +374,94 @@ void SmManager::show_index(const std::string& tab_name, Context* context) {
     printer.print_separator(context);
     outfile.close();
 }
+
+/**
+ * @description: 恢复后重建所有索引
+ *   crash后索引页可能丢失（仅保留数据页），需从数据表重建索引
+ */
+void SmManager::rebuild_all_indexes() {
+    // 1. 收集所有索引信息（表名+列名）
+    struct IndexInfo {
+        std::string tab_name;
+        std::vector<std::string> col_names;
+    };
+    std::vector<IndexInfo> all_indexes;
+    for (auto& tab_entry : db_.tabs_) {
+        for (auto& index : tab_entry.second.indexes) {
+            IndexInfo info;
+            info.tab_name = tab_entry.first;
+            for (auto& col : index.cols) {
+                info.col_names.push_back(col.name);
+            }
+            all_indexes.push_back(info);
+        }
+    }
+
+    if (all_indexes.empty()) return;
+
+    printf("[Recovery] 重建 %zu 个索引...\n", all_indexes.size());
+
+    // 2. 销毁旧索引文件并清理元数据
+    for (auto& info : all_indexes) {
+        std::string ix_name = ix_manager_->get_index_name(info.tab_name, info.col_names);
+        if (ihs_.count(ix_name)) {
+            ix_manager_->close_index(ihs_[ix_name].get());
+            ihs_.erase(ix_name);
+        }
+        if (disk_manager_->is_file(ix_name)) {
+            disk_manager_->destroy_file(ix_name);
+        }
+        TabMeta& tab = db_.get_table(info.tab_name);
+        auto index_iter = tab.get_index_meta(info.col_names);
+        if (index_iter != tab.indexes.end()) {
+            tab.indexes.erase(index_iter);
+        }
+    }
+
+    // 3. 重新创建索引（扫描表数据填充）
+    for (auto& info : all_indexes) {
+        TabMeta& tab = db_.get_table(info.tab_name);
+
+        std::vector<ColMeta> index_cols;
+        for (auto& col_name : info.col_names) {
+            auto col_iter = tab.get_col(col_name);
+            index_cols.push_back(*col_iter);
+        }
+
+        ix_manager_->create_index(info.tab_name, index_cols);
+
+        int key_len = 0;
+        for (auto& col : index_cols) key_len += col.len;
+
+        auto ih = ix_manager_->open_index(info.tab_name, index_cols);
+        RmFileHandle* fh = fhs_.at(info.tab_name).get();
+        char* key_buf = new char[key_len];
+
+        for (RmScan scan(fh); !scan.is_end(); scan.next()) {
+            Rid rid = scan.rid();
+            auto record = fh->get_record(rid, nullptr);
+            int offset = 0;
+            for (auto& col : index_cols) {
+                memcpy(key_buf + offset, record->data + col.offset, col.len);
+                offset += col.len;
+            }
+            ih->insert_entry(key_buf, rid, nullptr);
+        }
+        delete[] key_buf;
+
+        std::string ix_name = ix_manager_->get_index_name(info.tab_name, info.col_names);
+        ihs_.emplace(ix_name, std::move(ih));
+
+        IndexMeta index_meta;
+        index_meta.tab_name = info.tab_name;
+        index_meta.col_num = static_cast<int>(index_cols.size());
+        index_meta.col_tot_len = key_len;
+        index_meta.cols = index_cols;
+        tab.indexes.push_back(index_meta);
+
+        printf("[Recovery]   索引 %s(%s) 重建完成\n",
+               info.tab_name.c_str(), ix_name.c_str());
+    }
+
+    flush_meta();
+}
