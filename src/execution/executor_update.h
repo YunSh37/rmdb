@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "executor_abstract.h"
 #include "index/ix.h"
 #include "system/sm.h"
+#include "transaction/txn_defs.h"
 
 class UpdateExecutor : public AbstractExecutor {
    private:
@@ -53,6 +54,12 @@ class UpdateExecutor : public AbstractExecutor {
         for (auto& rid : rids_) {
             // 1. 读取当前记录
             auto rec = fh_->get_record(rid, context_);
+
+            // 保存旧记录到 WriteRecord（用于事务回滚）
+            if (context_->txn_ != nullptr) {
+                auto wr = new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, *rec);
+                context_->txn_->append_write_record(wr);
+            }
 
             // 2. 如果有索引，先记录旧键（用于后续删除）
             std::vector<std::string> old_keys;  // 每个索引的旧键

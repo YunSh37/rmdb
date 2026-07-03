@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "executor_abstract.h"
 #include "index/ix.h"
 #include "system/sm.h"
+#include "transaction/txn_defs.h"
 
 class DeleteExecutor : public AbstractExecutor {
    private:
@@ -39,8 +40,14 @@ class DeleteExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> Next() override {
         // 遍历删除所有匹配的记录
         for (auto& rid : rids_) {
-            // 先从索引中删除记录
+            // 删除前读取记录，保存到 WriteRecord（用于事务回滚）
             auto rec = fh_->get_record(rid, context_);
+            if (context_->txn_ != nullptr) {
+                auto wr = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec);
+                context_->txn_->append_write_record(wr);
+            }
+
+            // 先从索引中删除记录
             for (size_t i = 0; i < tab_.indexes.size(); ++i) {
                 auto& index = tab_.indexes[i];
                 std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);

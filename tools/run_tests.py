@@ -329,6 +329,79 @@ TOPIC6_TEST5 = [
      ""),
 ]
 
+# ============================================================
+# 题目七：事务控制语句
+# ============================================================
+
+TOPIC7_COMMIT_TEST = [
+    # commit_test: 事务提交测试（不含索引）
+    ("create table student (id int, name char(8), score float);", "SUCCESS"),
+    ("insert into student values (1, 'xiaohong', 90.0);", "SUCCESS"),
+    ("begin;", "SUCCESS"),
+    ("insert into student values (2, 'xiaoming', 99.0);", "SUCCESS"),
+    ("delete from student where id = 2;", "SUCCESS"),
+    ("commit;", "SUCCESS"),
+    # 提交后：只有 (1, xiaohong, 90.0) — 事务内的 INSERT+DELETE 已提交
+    ("select * from student;", "1|xiaohong|90"),
+]
+
+TOPIC7_ABORT_TEST = [
+    # abort_test: 事务回滚测试（不含索引）
+    ("create table student (id int, name char(8), score float);", "SUCCESS"),
+    ("insert into student values (1, 'xiaohong', 90.0);", "SUCCESS"),
+    ("begin;", "SUCCESS"),
+    ("insert into student values (2, 'xiaoming', 99.0);", "SUCCESS"),
+    ("delete from student where id = 2;", "SUCCESS"),
+    ("abort;", "SUCCESS"),
+    # 回滚后：只有 (1, xiaohong, 90.0) — 事务内的所有操作被撤销
+    ("select * from student;", "1|xiaohong|90"),
+    # 验证 (2, xiaoming) 不在表中（事务回滚了INSERT）
+]
+
+TOPIC7_ABORT_TEST2 = [
+    # abort_test 扩展：回滚 INSERT + UPDATE
+    ("create table t (id int, val int);", "SUCCESS"),
+    ("insert into t values (1, 100);", "SUCCESS"),
+    ("begin;", "SUCCESS"),
+    ("insert into t values (2, 200);", "SUCCESS"),
+    ("update t set val = 999 where id = 1;", "SUCCESS"),
+    ("abort;", "SUCCESS"),
+    # 回滚后：只有原始数据 (1, 100)
+    ("select * from t;", "1|100"),
+]
+
+TOPIC7_COMMIT_INDEX_TEST = [
+    # commit_index_test: 事务提交测试（含唯一索引）
+    ("create table student_idx (id int, name char(8), score float);", "SUCCESS"),
+    ("create index student_idx(id);", "SUCCESS"),
+    ("insert into student_idx values (1, 'xiaohong', 90.0);", "SUCCESS"),
+    ("begin;", "SUCCESS"),
+    ("insert into student_idx values (2, 'xiaoming', 99.0);", "SUCCESS"),
+    ("commit;", "SUCCESS"),
+    # 提交后2条记录都在，索引可用
+    ("select * from student_idx where id = 1;", "1|xiaohong|90"),
+    ("select * from student_idx where id = 2;", "2|xiaoming|99"),
+    # 验证唯一索引仍然有效（不能插入重复id）
+    ("insert into student_idx values (1, 'dup', 50.0);", "failure"),
+]
+
+TOPIC7_ABORT_INDEX_TEST = [
+    # abort_index_test: 事务回滚测试（含唯一索引）
+    ("create table student_idx2 (id int, name char(8), score float);", "SUCCESS"),
+    ("create index student_idx2(id);", "SUCCESS"),
+    ("insert into student_idx2 values (1, 'xiaohong', 90.0);", "SUCCESS"),
+    ("begin;", "SUCCESS"),
+    ("insert into student_idx2 values (2, 'xiaoming', 99.0);", "SUCCESS"),
+    ("delete from student_idx2 where id = 1;", "SUCCESS"),
+    ("update student_idx2 set name = 'xiaoqin' where id = 2;", "SUCCESS"),
+    ("abort;", "SUCCESS"),
+    # 回滚后：只有原始数据 (1, xiaohong, 90.0)
+    ("select * from student_idx2;", "1|xiaohong|90"),
+    # 唯一索引恢复：可以重新插入 id=2（之前事务中的INSERT已被回滚）
+    ("insert into student_idx2 values (2, 'newstud', 85.0);", "SUCCESS"),
+    ("select * from student_idx2 where id = 2;", "2|newstud|85"),
+]
+
 
 class RMDBTester:
     def __init__(self):
@@ -563,6 +636,7 @@ class RMDBTester:
             "students", "classes", "teams", "players",
             "authors", "books", "records",
             "departments", "employees", "projects", "empty_departments",
+            "student", "student_idx", "student_idx2", "t",
         ]
         for t in tables_to_drop:
             self.send_sql(f"drop table {t};")
@@ -640,6 +714,25 @@ def main():
 
         # 题目六清理
         tester.cleanup_leftover_tables()
+
+        # ==== 题目七 ====
+        # 注意：含索引的测试对表名敏感，避免 cleanup 干扰
+        tester.run_tests("题目七 测试点1: 事务提交(不含索引)", TOPIC7_COMMIT_TEST)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目七 测试点2: 事务回滚(不含索引)", TOPIC7_ABORT_TEST)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目七 测试点2-扩展: 回滚 INSERT+UPDATE", TOPIC7_ABORT_TEST2)
+        tester.cleanup_leftover_tables()
+
+        # 含索引测试连续执行（共享不同的表名），中间不清理
+        tester.run_tests("题目七 测试点3: 事务提交(含索引)", TOPIC7_COMMIT_INDEX_TEST)
+        tester.run_tests("题目七 测试点4: 事务回滚(含索引)", TOPIC7_ABORT_INDEX_TEST)
+        tester.cleanup_leftover_tables()
+
+        # ==== 数据一致性检验 ====
+        tester.check_data_consistency()
 
     finally:
         tester.stop_server()
