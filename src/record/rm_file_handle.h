@@ -74,6 +74,11 @@ class RmFileHandle {
         }
     }
 
+    /** 强制将文件头写回磁盘（用于检查点确保元数据持久化） */
+    void sync_file_header() {
+        disk_manager_->write_page(fd_, RM_FILE_HDR_PAGE, (char*)&file_hdr_, sizeof(file_hdr_));
+    }
+
     /** 获取用户数据大小（不含MVCC头） */
     int get_user_record_size() const { return file_hdr_.record_size - MVCC_HEADER_SIZE; }
 

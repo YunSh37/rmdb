@@ -187,6 +187,16 @@ void DiskManager::close_file(int fd) {
     path2fd_.erase(path);
 }
 
+/**
+ * @description: 同步文件到磁盘，确保数据持久化
+ * @param {int} fd 文件句柄
+ */
+void DiskManager::sync_file(int fd) {
+    if (fd >= 0) {
+        fsync(fd);
+    }
+}
+
 
 /**
  * @description: 获得文件的大小

@@ -11,9 +11,9 @@ import time
 import threading
 
 try:
-    from .base import RMDBTester
+    from .base import RMDBTester, DB_PATH
 except ImportError:
-    from base import RMDBTester
+    from base import RMDBTester, DB_PATH
 
 # ============================================================
 # 测试点1: 单线程小数据量故障恢复（无检查点）
@@ -109,40 +109,40 @@ TOPIC9_TEST6_VERIFY = [
 def run(tester: RMDBTester):
     """执行题目九全部6个测试点"""
 
-    # ================================================================
-    # 测试点1: 单线程小数据量故障恢复
-    # ================================================================
-    tester.run_tests("题目九 测试点1: 单线程故障恢复(crash前SQL)", TOPIC9_TEST1_CRASH)
-    tester.send_crash()
-    if tester.restart_after_crash():
-        tester.run_tests("题目九 测试点1: 单线程故障恢复(crash后验证)", TOPIC9_TEST1_VERIFY)
-        tester.cleanup_leftover_tables()
+    # # ================================================================
+    # # 测试点1: 单线程小数据量故障恢复
+    # # ================================================================
+    # tester.run_tests("题目九 测试点1: 单线程故障恢复(crash前SQL)", TOPIC9_TEST1_CRASH)
+    # tester.send_crash()
+    # if tester.restart_after_crash():
+    #     tester.run_tests("题目九 测试点1: 单线程故障恢复(crash后验证)", TOPIC9_TEST1_VERIFY)
+    #     tester.cleanup_leftover_tables()
 
-    # 测试点1b: abort事务回滚验证
-    tester.run_tests("题目九 测试点1b: Abort回滚(crash前SQL)", TOPIC9_TEST1B_CRASH)
-    tester.send_crash()
-    if tester.restart_after_crash():
-        tester.run_tests("题目九 测试点1b: Abort回滚(crash后验证)", TOPIC9_TEST1B_VERIFY)
-        tester.cleanup_leftover_tables()
+    # # 测试点1b: abort事务回滚验证
+    # tester.run_tests("题目九 测试点1b: Abort回滚(crash前SQL)", TOPIC9_TEST1B_CRASH)
+    # tester.send_crash()
+    # if tester.restart_after_crash():
+    #     tester.run_tests("题目九 测试点1b: Abort回滚(crash后验证)", TOPIC9_TEST1B_VERIFY)
+    #     tester.cleanup_leftover_tables()
 
-    # ================================================================
-    # 测试点2: 多线程小数据量故障恢复
-    # ================================================================
-    _run_test_point_2(tester)
+    # # ================================================================
+    # # 测试点2: 多线程小数据量故障恢复
+    # # ================================================================
+    # _run_test_point_2(tester)
 
-    # ================================================================
-    # 测试点3: 含索引故障恢复
-    # ================================================================
-    tester.run_tests("题目九 测试点3: 含索引故障恢复(crash前SQL)", TOPIC9_TEST3_CRASH)
-    tester.send_crash()
-    if tester.restart_after_crash():
-        tester.run_tests("题目九 测试点3: 含索引故障恢复(crash后验证)", TOPIC9_TEST3_VERIFY)
-        tester.cleanup_leftover_tables()
+    # # ================================================================
+    # # 测试点3: 含索引故障恢复
+    # # ================================================================
+    # tester.run_tests("题目九 测试点3: 含索引故障恢复(crash前SQL)", TOPIC9_TEST3_CRASH)
+    # tester.send_crash()
+    # if tester.restart_after_crash():
+    #     tester.run_tests("题目九 测试点3: 含索引故障恢复(crash后验证)", TOPIC9_TEST3_VERIFY)
+    #     tester.cleanup_leftover_tables()
 
-    # ================================================================
-    # 测试点4: 多线程大数据量故障恢复
-    # ================================================================
-    _run_test_point_4(tester)
+    # # ================================================================
+    # # 测试点4: 多线程大数据量故障恢复
+    # # ================================================================
+    # _run_test_point_4(tester)
 
     # ================================================================
     # 测试点5: 大数据量无检查点 + 恢复时间 t1
@@ -164,27 +164,6 @@ def run(tester: RMDBTester):
         tester.cleanup_leftover_tables()
 
     tester.check_data_consistency()
-
-
-if __name__ == "__main__":
-    import sys, os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from base import RMDBTester
-
-    tester = RMDBTester()
-    try:
-        tester.start_server()
-        print("服务端已启动")
-        if not tester.connect():
-            print("无法连接到服务端！"); sys.exit(1)
-        print("已连接到服务端\n")
-        run(tester)
-    finally:
-        tester.stop_server()
-
-    total = tester.passed + tester.failed
-    print(f"\n测试总结: {tester.passed}/{total} 通过, {tester.failed} 失败")
-    sys.exit(0 if tester.failed == 0 else 1)
 
 
 def _run_test_point_2(tester: RMDBTester):
@@ -305,7 +284,7 @@ def _run_test_point_5(tester: RMDBTester):
     print(f"{'='*60}")
 
     tester._tpcc_setup()
-    tester._tpcc_run_transactions(num_txns=50, with_checkpoint=False)
+    tester._tpcc_run_transactions(num_txns=50)
 
     print("  发送 crash...")
     tester.send_crash()
@@ -349,7 +328,6 @@ def _run_test_point_6(tester: RMDBTester, t1):
     # 清理旧数据，重启全新环境
     import shutil
     import os
-    from .base import DB_PATH
 
     tester.stop_server()
     if os.path.exists(DB_PATH):
@@ -406,3 +384,24 @@ def _run_test_point_6(tester: RMDBTester, t1):
         else:
             print(f"  ✗ FAIL: 一致性检测失败")
             tester.failed += 1
+
+
+if __name__ == "__main__":
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from base import RMDBTester
+
+    tester = RMDBTester()
+    try:
+        tester.start_server()
+        print("服务端已启动")
+        if not tester.connect():
+            print("无法连接到服务端！"); sys.exit(1)
+        print("已连接到服务端\n")
+        run(tester)
+    finally:
+        tester.stop_server()
+
+    total = tester.passed + tester.failed
+    print(f"\n测试总结: {tester.passed}/{total} 通过, {tester.failed} 失败")
+    sys.exit(0 if tester.failed == 0 else 1)

@@ -38,6 +38,8 @@ void BufferPoolManager::update_page(Page *page, PageId new_page_id, frame_id_t n
         disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->data_, PAGE_SIZE);
         page->is_dirty_ = false;
     }
+    // 1.5. 旧页已刷盘/淘汰，重置首次变脏LSN（页面即将获得新身份）
+    page->reset_rec_lsn();
     // 2. 从 page_table_ 移除旧页面映射
     page_table_.erase(page->id_);
     // 3. 重置页面数据并建立新映射
@@ -76,6 +78,8 @@ Page* BufferPoolManager::fetch_page(PageId page_id) {
     if (page->is_dirty_) {
         disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->data_, PAGE_SIZE);
     }
+    // 2.5. 旧页被淘汰，重置首次变脏LSN（页面即将从磁盘载入新数据）
+    page->reset_rec_lsn();
     // 3. 从 page_table_ 移除 victim 页的旧映射
     page_table_.erase(page->id_);
     // 4. 从磁盘读取目标页
@@ -136,8 +140,9 @@ bool BufferPoolManager::flush_page(PageId page_id) {
     Page* page = &pages_[frame_id];
     // 2. 无论是否为脏页都写回磁盘
     disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->data_, PAGE_SIZE);
-    // 3. 清除 dirty 标志
+    // 3. 清除 dirty 标志，同时重置首次变脏LSN
     page->is_dirty_ = false;
+    page->reset_rec_lsn();
     return true;
 }
 
@@ -158,6 +163,8 @@ Page* BufferPoolManager::new_page(PageId* page_id) {
     if (page->is_dirty_) {
         disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->data_, PAGE_SIZE);
     }
+    // 2.5. 旧页被淘汰，重置首次变脏LSN
+    page->reset_rec_lsn();
     // 3. 从 page_table_ 移除旧映射
     page_table_.erase(page->id_);
     // 4. 在指定 fd 上分配新 page_no
@@ -200,6 +207,7 @@ bool BufferPoolManager::delete_page(PageId page_id) {
     page->id_.page_no = INVALID_PAGE_ID;
     page->is_dirty_ = false;
     page->pin_count_ = 0;
+    page->reset_rec_lsn();  // 页面被删除/释放，重置首次变脏LSN
     free_list_.push_back(frame_id);
     return true;
 }
@@ -216,8 +224,30 @@ void BufferPoolManager::flush_all_pages(int fd) {
         if (page->id_.fd == fd && page->is_dirty_) {
             disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->data_, PAGE_SIZE);
             page->is_dirty_ = false;
+            page->reset_rec_lsn();  // 刷盘后页面不再脏，重置首次变脏LSN
         }
     }
+}
+
+/**
+ * @description: 收集缓冲池中所有脏页的信息（用于检查点DPT）
+ *   遍历所有页面，对每个脏页记录其PageId和rec_lsn（首次变脏LSN）
+ *   rec_lsn 用于恢复时确定REDO起点：min(rec_lsn) =
+ *   最早的尚未刷盘的修改，恢复必须从此LSN开始重做
+ * @return 脏页列表，每项包含 (PageId, rec_lsn)
+ */
+std::vector<std::pair<PageId, lsn_t>> BufferPoolManager::collect_dirty_pages() {
+    std::scoped_lock lock{latch_};
+    std::vector<std::pair<PageId, lsn_t>> dirty_pages;
+    for (size_t i = 0; i < pool_size_; i++) {
+        Page* page = &pages_[i];
+        if (page->is_dirty_) {
+            // 使用 rec_lsn_（首次变脏LSN）而非 page_lsn（最后修改LSN）
+            // 这样REDO才能从正确的位置开始，确保所有未刷盘的修改都被重做
+            dirty_pages.emplace_back(page->id_, page->get_rec_lsn());
+        }
+    }
+    return dirty_pages;
 }
 
 /**
@@ -235,6 +265,8 @@ void BufferPoolManager::discard_all_pages(int fd) {
                 disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->data_, PAGE_SIZE);
                 page->is_dirty_ = false;
             }
+            // 重置首次变脏LSN（页面即将被回收）
+            page->reset_rec_lsn();
             // 从page_table_中移除
             auto it = page_table_.find(page->id_);
             if (it != page_table_.end()) {

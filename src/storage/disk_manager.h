@@ -58,6 +58,9 @@ class DiskManager {
 
     void close_file(int fd);
 
+    /** 同步文件到磁盘（确保数据持久化） */
+    void sync_file(int fd);
+
     int get_file_size(const std::string &file_name);
 
     std::string get_file_name(int fd);

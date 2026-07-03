@@ -76,6 +76,11 @@ class BufferPoolManager {
 
     void flush_all_pages(int fd);
 
+    /** 收集缓冲池中所有脏页的信息（用于检查点DPT）
+     *  返回 (PageId, page_lsn) 列表，page_lsn 表示该页最后一次修改的日志LSN
+     */
+    std::vector<std::pair<PageId, lsn_t>> collect_dirty_pages();
+
     /** 丢弃缓冲池中所有属于指定fd的页面（写回脏页并释放frame） */
     void discard_all_pages(int fd);
 

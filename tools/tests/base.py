@@ -112,11 +112,36 @@ class RMDBTester:
         return True
 
     def timed_restart_after_crash(self):
-        """crash后重启并测量恢复时间，返回 (成功, 耗时秒数)"""
+        """crash后重启并测量恢复时间，返回 (成功, 耗时秒数)
+        通过轮询连接代替固定延迟，精确测量服务器实际就绪时间。"""
         t_start = time.perf_counter()
-        self.start_server_no_clean()
+        os.chdir(BUILD_DIR)
+        self._recovery_log = open(os.path.join(TEST_DB, "recovery_stderr.log"), "a")
+        self.server_proc = subprocess.Popen(
+            ["./bin/rmdb", TEST_DB],
+            stdout=self._recovery_log, stderr=self._recovery_log
+        )
+        os.chdir("..")
+        # 轮询等待服务器就绪（最多等待10秒），代替固定 time.sleep(1.0)
+        server_ready = False
+        deadline = time.perf_counter() + 10.0
+        while time.perf_counter() < deadline:
+            try:
+                test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_sock.settimeout(0.5)
+                test_sock.connect(("127.0.0.1", SERVER_PORT))
+                test_sock.close()
+                server_ready = True
+                break
+            except (ConnectionRefusedError, OSError):
+                time.sleep(0.05)
+        if not server_ready:
+            elapsed = time.perf_counter() - t_start
+            return False, elapsed
+        # 服务器就绪，连接并执行查询
         if not self.connect():
-            return False, 0.0
+            elapsed = time.perf_counter() - t_start
+            return False, elapsed
         result = self.send_sql("select * from district;")
         t_end = time.perf_counter()
         elapsed = t_end - t_start
@@ -326,7 +351,7 @@ class RMDBTester:
         """题目三 测试点4/5：单列/多列索引性能验证
         插入N条数据 → 执行N次查询(无索引) → 建索引 → 再执行N次查询 → 比较耗时
         """
-        N = 1000  # 官方测试用3000，此处用1000折中
+        N = 3000  # 3000条数据，匹配官方测试要求
         col_type = "多列" if is_multi_col else "单列"
         test_name = f"题目三 测试点{'5' if is_multi_col else '4'}: {col_type}索引性能验证"
 
@@ -383,12 +408,12 @@ class RMDBTester:
             self.passed += 1
         else:
             ratio = time_b / time_a * 100 if time_a > 0 else 100
-            print(f"  比率: time_b/time_a = {ratio:.1f}% (目标 ≤ 85%)")
-            if ratio <= 85:
+            print(f"  比率: time_b/time_a = {ratio:.1f}% (目标 ≤ 70%)")
+            if ratio <= 70:
                 print(f"  ✓ PASS: {col_type}索引加速有效 ({ratio:.1f}%)")
                 self.passed += 1
             else:
-                print(f"  ✗ FAIL: {col_type}索引加速不足 ({ratio:.1f}% > 85%)")
+                print(f"  ✗ FAIL: {col_type}索引加速不足 ({ratio:.1f}% > 70%)")
                 self.failed += 1
 
         self.send_sql("drop table warehouse;")
@@ -564,9 +589,10 @@ class RMDBTester:
         print("  TPC-C 表创建和数据插入完成")
 
     def _tpcc_run_transactions(self, num_txns=50, with_checkpoint=False):
-        """执行TPC-C类NewOrder事务（文档2.2节模式）"""
+        """执行TPC-C类NewOrder事务（文档2.2节模式）
+        检查点通过独立临时 socket 发送，避免影响主事务连接。"""
         print(f"  执行 {num_txns} 个TPC-C事务..."
-              + (" (随机创建检查点)" if with_checkpoint else ""))
+              + (" (每5个事务创建检查点)" if with_checkpoint else ""))
         checkpoint_count = 0
         for txn_idx in range(num_txns):
             o_id = 11 + txn_idx
@@ -574,6 +600,7 @@ class RMDBTester:
             i_id = random.randint(1, 20)
             quantity = random.randint(1, 10)
 
+            # 执行一个完整的 NewOrder 事务
             try:
                 self.send_sql("begin;")
                 self.send_sql(
@@ -610,7 +637,8 @@ class RMDBTester:
             except Exception:
                 pass
 
-            if with_checkpoint and random.random() < 0.30:
+            # 每 5 个事务创建一个静态检查点（使用主连接内联发送，确保时序正确）
+            if with_checkpoint and (txn_idx + 1) % 5 == 0:
                 try:
                     self.send_sql("create static_checkpoint;")
                     checkpoint_count += 1

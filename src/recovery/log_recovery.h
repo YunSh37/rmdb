@@ -67,6 +67,14 @@ private:
     /** 日志文件偏移记录：(LSN, 文件偏移量) —— 用于undo阶段快速定位日志 */
     std::vector<std::pair<lsn_t, int>> lsn_offsets_;
 
+    /** REDO 提示数组（与 lsn_offsets_ 一一对应），避免 REDO 阶段重复反序列化
+     *  仅对 INSERT/UPDATE/DELETE 有效，fd=-1 表示非数据操作 */
+    struct RedoHint {
+        int fd = -1;
+        int page_no = 0;
+    };
+    std::vector<RedoHint> redo_hints_;
+
     /** 完整日志数据（在analyze阶段读入） */
     std::vector<char> log_data_;
 

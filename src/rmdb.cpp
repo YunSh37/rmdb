@@ -235,6 +235,10 @@ void start_server() {
         exit(1);
     }
 
+    // sockfd 必须在循环外声明，否则其地址传递给工作线程后，
+    // 下一次循环迭代会导致 sockfd 超出作用域（栈内存被重用），
+    // 工作线程访问已释放的栈内存，造成 SIGSEGV
+    int sockfd;
     while (!should_exit) {
         std::cout << "Waiting for new connection..." << std::endl;
         pthread_t thread_id;
@@ -248,15 +252,17 @@ void start_server() {
 
         // Block here. Until server accepts a new connection.
         pthread_mutex_lock(sockfd_mutex);
-        int sockfd = accept(sockfd_server, (struct sockaddr *)(&s_addr_client), (socklen_t *)(&client_length));
+        sockfd = accept(sockfd_server, (struct sockaddr *)(&s_addr_client), (socklen_t *)(&client_length));
         if (sockfd == -1) {
             std::cout << "Accept error!" << std::endl;
+            pthread_mutex_unlock(sockfd_mutex);  // 必须解锁，否则下次循环会死锁
             continue;  // ignore current socket ,continue while loop.
         }
-        
+
         // 和客户端建立连接，并开启一个线程负责处理客户端请求
         if (pthread_create(&thread_id, nullptr, &client_handler, (void *)(&sockfd)) != 0) {
             std::cout << "Create thread fail!" << std::endl;
+            pthread_mutex_unlock(sockfd_mutex);  // 创建线程失败时也需要解锁
             break;  // break while loop
         }
 

@@ -69,7 +69,21 @@ class Page {
 
     inline lsn_t get_page_lsn() { return *reinterpret_cast<lsn_t *>(get_data() + OFFSET_LSN) ; }
 
-    inline void set_page_lsn(lsn_t page_lsn) { memcpy(get_data() + OFFSET_LSN, &page_lsn, sizeof(lsn_t)); }
+    inline void set_page_lsn(lsn_t page_lsn) {
+        memcpy(get_data() + OFFSET_LSN, &page_lsn, sizeof(lsn_t));
+        // 追踪首次变脏LSN（rec_lsn），用于检查点DPT
+        // 仅在首次变脏时设置，后续修改不更新
+        if (rec_lsn_ == 0) {
+            rec_lsn_ = page_lsn;
+        }
+    }
+
+    /** 获取首次变脏LSN（Recovery LSN），用于检查点DPT
+     *  rec_lsn_ 仅在缓冲池内存中存在，不写入磁盘页面 */
+    inline lsn_t get_rec_lsn() const { return rec_lsn_; }
+
+    /** 重置 rec_lsn_（页面刷盘后调用，标记页面不再需要REDO到此LSN） */
+    inline void reset_rec_lsn() { rec_lsn_ = 0; }
 
    private:
     void reset_memory() { memset(data_, OFFSET_PAGE_START, PAGE_SIZE); }  // 将data_的PAGE_SIZE个字节填充为0
@@ -87,4 +101,9 @@ class Page {
 
     /** The pin count of this page. */
     int pin_count_ = 0;
+
+    /** 首次变脏时的日志LSN（仅在缓冲池内存中跟踪，不写入磁盘）
+     *  0 表示页面干净或刚读入，非0表示首次变脏时的LSN
+     *  刷盘后重置为0 */
+    lsn_t rec_lsn_ = 0;
 };

@@ -388,7 +388,9 @@ public:
     size_t table_name_size_;    // 表名称的大小
 };
 
-/** 检查点日志记录：记录ATT和DPT快照，恢复时从此LSN开始分析 */
+/** 检查点日志记录：记录ATT和DPT快照，恢复时从此LSN开始分析
+ *  DPT使用(tab_name, page_no, lsn)代替(fd, page_no, lsn)，因为恢复时fd可能不同
+ */
 class CheckpointLogRecord: public LogRecord {
 public:
     CheckpointLogRecord() {
@@ -407,12 +409,16 @@ public:
         log_tot_len_ += att_count_ * (sizeof(txn_id_t) + sizeof(lsn_t));
     }
 
-    /** 设置DPT（脏页表） */
-    void set_dpt(const std::vector<std::pair<PageId, lsn_t>>& dpt) {
-        dpt_ = dpt;
-        dpt_count_ = dpt_.size();
-        log_tot_len_ += sizeof(size_t);                     // dpt_count
-        log_tot_len_ += dpt_count_ * (sizeof(int) + sizeof(page_id_t) + sizeof(lsn_t));
+    /** 设置DPT（脏页表），使用表名+页号代替fd+页号 */
+    void set_dpt(const std::vector<std::tuple<std::string, page_id_t, lsn_t>>& dpt) {
+        dpt_entries_ = dpt;
+        dpt_count_ = dpt_entries_.size();
+        for (auto& [tab_name, page_no, lsn] : dpt_entries_) {
+            log_tot_len_ += sizeof(size_t) + tab_name.length();  // table name
+            log_tot_len_ += sizeof(page_id_t);                    // page_no
+            log_tot_len_ += sizeof(lsn_t);                        // lsn
+        }
+        log_tot_len_ += sizeof(size_t);                           // dpt_count
     }
 
     void serialize(char* dest) const override {
@@ -430,10 +436,13 @@ public:
         // DPT
         memcpy(dest + offset, &dpt_count_, sizeof(size_t));
         offset += sizeof(size_t);
-        for (auto& [pid, lsn] : dpt_) {
-            memcpy(dest + offset, &pid.fd, sizeof(int));
-            offset += sizeof(int);
-            memcpy(dest + offset, &pid.page_no, sizeof(page_id_t));
+        for (auto& [tab_name, page_no, lsn] : dpt_entries_) {
+            size_t name_len = tab_name.length();
+            memcpy(dest + offset, &name_len, sizeof(size_t));
+            offset += sizeof(size_t);
+            memcpy(dest + offset, tab_name.data(), name_len);
+            offset += name_len;
+            memcpy(dest + offset, &page_no, sizeof(page_id_t));
             offset += sizeof(page_id_t);
             memcpy(dest + offset, &lsn, sizeof(lsn_t));
             offset += sizeof(lsn_t);
@@ -457,16 +466,17 @@ public:
         // DPT
         dpt_count_ = *reinterpret_cast<const size_t*>(src + offset);
         offset += sizeof(size_t);
-        dpt_.clear();
+        dpt_entries_.clear();
         for (size_t i = 0; i < dpt_count_; i++) {
-            PageId pid;
-            pid.fd = *reinterpret_cast<const int*>(src + offset);
-            offset += sizeof(int);
-            pid.page_no = *reinterpret_cast<const page_id_t*>(src + offset);
+            size_t name_len = *reinterpret_cast<const size_t*>(src + offset);
+            offset += sizeof(size_t);
+            std::string tab_name(src + offset, name_len);
+            offset += name_len;
+            page_id_t page_no = *reinterpret_cast<const page_id_t*>(src + offset);
             offset += sizeof(page_id_t);
             lsn_t lsn = *reinterpret_cast<const lsn_t*>(src + offset);
             offset += sizeof(lsn_t);
-            dpt_.emplace_back(pid, lsn);
+            dpt_entries_.emplace_back(tab_name, page_no, lsn);
         }
     }
 
@@ -477,7 +487,7 @@ public:
     }
 
     std::vector<std::pair<txn_id_t, lsn_t>> att_;     // 活跃事务表
-    std::vector<std::pair<PageId, lsn_t>> dpt_;        // 脏页表
+    std::vector<std::tuple<std::string, page_id_t, lsn_t>> dpt_entries_; // 脏页表
     size_t att_count_ = 0;
     size_t dpt_count_ = 0;
 };
