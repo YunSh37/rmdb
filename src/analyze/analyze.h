@@ -27,7 +27,7 @@ class Query{
     // TODO jointree
     // where条件
     std::vector<Condition> conds;
-    // 投影列
+    // 投影列（输出列，包含别名信息）
     std::vector<TabCol> cols;
     // 表名
     std::vector<std::string> tables;
@@ -40,6 +40,27 @@ class Query{
 
     // 别名映射：alias → real_table_name（EXPLAIN 显示用）
     std::map<std::string, std::string> aliases;
+
+    // ========== 聚合与分组 ==========
+    /** 是否包含聚合函数 */
+    bool has_aggregate = false;
+    /** 每个 SELECT 列的聚合类型（AGG_NONE=普通列，AGG_MAX/MIN/COUNT/SUM/COUNT_STAR） */
+    std::vector<int> agg_types;
+    /** 聚合目标列（与 cols 一一对应，AGG_NONE 和 COUNT_STAR 时为空 TabCol） */
+    std::vector<TabCol> agg_targets;
+
+    // ========== GROUP BY ==========
+    std::vector<TabCol> group_by_cols;
+
+    // ========== HAVING ==========
+    std::vector<Condition> having_conds;
+
+    // ========== ORDER BY 多列 ==========
+    std::vector<TabCol> order_by_cols;
+    std::vector<bool> order_by_desc;
+
+    // ========== LIMIT ==========
+    int limit_count = -1;  // -1 表示无 LIMIT
 
     Query(){}
 

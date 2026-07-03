@@ -44,7 +44,13 @@ class InsertExecutor : public AbstractExecutor {
             auto &col = tab_.cols[i];
             auto &val = values_[i];
             if (col.type != val.type) {
-                throw IncompatibleTypeError(coltype2str(col.type), coltype2str(val.type));
+                // 允许 INT→FLOAT 隐式转换（例如 INSERT INTO t VALUES(1, 95)，score 为 FLOAT）
+                if (col.type == TYPE_FLOAT && val.type == TYPE_INT) {
+                    val.type = TYPE_FLOAT;
+                    val.float_val = static_cast<float>(val.int_val);
+                } else {
+                    throw IncompatibleTypeError(coltype2str(col.type), coltype2str(val.type));
+                }
             }
             val.init_raw(col.len);
             memcpy(rec.data + col.offset, val.raw->data, col.len);

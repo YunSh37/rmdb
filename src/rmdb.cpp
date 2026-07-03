@@ -166,7 +166,18 @@ void *client_handler(void *sock_fd) {
                     outfile << "failure\n";
                     outfile.close();
                 }
+            } else {
+                // 解析结果为 nullptr（EXIT 或 HELP 等）
             }
+        } else {
+            // 解析错误：发送错误消息给客户端
+            std::string err_msg = "failure\n";
+            memcpy(data_send, err_msg.c_str(), err_msg.length());
+            offset = err_msg.length();
+            std::fstream outfile;
+            outfile.open("output.txt", std::ios::out | std::ios::app);
+            outfile << err_msg;
+            outfile.close();
         }
         if(finish_analyze == false) {
             yy_delete_buffer(buf);

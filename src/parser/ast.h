@@ -17,7 +17,13 @@ See the Mulan PSL v2 for more details. */
 enum JoinType {
     INNER_JOIN, LEFT_JOIN, RIGHT_JOIN, FULL_JOIN
 };
+
 namespace ast {
+
+/** 聚合函数类型 */
+enum AggFuncType {
+    AGG_NONE, AGG_MAX, AGG_MIN, AGG_COUNT, AGG_SUM, AGG_COUNT_STAR
+};
 
 enum SvType {
     SV_TYPE_INT, SV_TYPE_FLOAT, SV_TYPE_STRING, SV_TYPE_BOOL
@@ -158,6 +164,22 @@ struct Col : public Expr {
             tab_name(std::move(tab_name_)), col_name(std::move(col_name_)) {}
 };
 
+/** SELECT 列表项：普通列或聚合函数列 */
+struct SelectCol : public TreeNode {
+    enum ExprType { COLUMN, AGGREGATE };
+    ExprType expr_type;
+    std::shared_ptr<Col> col;           // 列引用（聚合函数的参数列也存这里）
+    AggFuncType agg_type;               // 聚合类型（COLUMN 时为 AGG_NONE）
+    std::string alias;                  // AS 别名（空字符串=无别名）
+
+    SelectCol(std::shared_ptr<Col> col_) :
+            expr_type(COLUMN), col(std::move(col_)), agg_type(AGG_NONE) {}
+    SelectCol(AggFuncType agg_type_, std::shared_ptr<Col> agg_col_) :
+            expr_type(AGGREGATE), col(std::move(agg_col_)), agg_type(agg_type_) {}
+    SelectCol(AggFuncType agg_type_, std::shared_ptr<Col> agg_col_, std::string alias_) :
+            expr_type(AGGREGATE), col(std::move(agg_col_)), agg_type(agg_type_), alias(std::move(alias_)) {}
+};
+
 struct SetClause : public TreeNode {
     std::string col_name;
     std::shared_ptr<Value> val;
@@ -177,10 +199,10 @@ struct BinaryExpr : public TreeNode {
 
 struct OrderBy : public TreeNode
 {
-    std::shared_ptr<Col> cols;
-    OrderByDir orderby_dir;
-    OrderBy( std::shared_ptr<Col> cols_, OrderByDir orderby_dir_) :
-       cols(std::move(cols_)), orderby_dir(std::move(orderby_dir_)) {}
+    std::vector<std::shared_ptr<Col>> cols;      // ORDER BY 列（支持多列）
+    std::vector<OrderByDir> orderby_dirs;         // 每列排序方向
+    OrderBy(std::vector<std::shared_ptr<Col>> cols_, std::vector<OrderByDir> dirs_) :
+       cols(std::move(cols_)), orderby_dirs(std::move(dirs_)) {}
 };
 
 struct InsertStmt : public TreeNode {
@@ -229,7 +251,7 @@ struct FromClause {
 };
 
 struct SelectStmt : public TreeNode {
-    std::vector<std::shared_ptr<Col>> cols;
+    std::vector<std::shared_ptr<SelectCol>> sel_cols;  // SELECT 列表项
     std::vector<std::string> tabs;
     std::vector<std::shared_ptr<BinaryExpr>> conds;
     std::vector<std::shared_ptr<JoinExpr>> jointree;
@@ -237,19 +259,36 @@ struct SelectStmt : public TreeNode {
     /** 别名映射：alias → real_table_name，由解析器填充，分析器用于解析列引用 */
     std::map<std::string, std::string> aliases;
 
+    /** ORDER BY 信息 */
+    bool has_order = false;
+    std::vector<std::shared_ptr<Col>> order_cols;       // ORDER BY 列（支持多列）
+    std::vector<OrderByDir> order_dirs;                  // 每列排序方向
 
-    bool has_sort;
-    std::shared_ptr<OrderBy> order;
+    /** GROUP BY 子句 */
+    std::vector<std::shared_ptr<Col>> group_by;          // GROUP BY 列
 
+    /** HAVING 子句 */
+    std::vector<std::shared_ptr<BinaryExpr>> having_conds;
 
-    SelectStmt(std::vector<std::shared_ptr<Col>> cols_,
+    /** LIMIT 子句（-1 表示无 LIMIT） */
+    int limit_count = -1;
+
+    SelectStmt() = default;
+    SelectStmt(std::vector<std::shared_ptr<SelectCol>> sel_cols_,
                std::vector<std::string> tabs_,
                std::vector<std::shared_ptr<BinaryExpr>> conds_,
                std::shared_ptr<OrderBy> order_) :
-            cols(std::move(cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)),
-            order(std::move(order_)) {
-                has_sort = (bool)order;
-            }
+            sel_cols(std::move(sel_cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)) {
+        if (order_) {
+            has_order = true;
+            order_cols = order_->cols;
+            order_dirs = order_->orderby_dirs;
+        }
+    }
+    SelectStmt(std::vector<std::shared_ptr<SelectCol>> sel_cols_,
+               std::vector<std::string> tabs_,
+               std::vector<std::shared_ptr<BinaryExpr>> conds_) :
+            sel_cols(std::move(sel_cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)) {}
 };
 
 // Explain 语句，包装一个 SelectStmt
@@ -276,6 +315,7 @@ struct SemValue {
     std::string sv_str;
     bool sv_bool;
     OrderByDir sv_orderby_dir;
+    std::vector<OrderByDir> sv_orderby_dirs;
     std::vector<std::string> sv_strs;
 
     std::shared_ptr<TreeNode> sv_node;
@@ -294,6 +334,11 @@ struct SemValue {
 
     std::shared_ptr<Col> sv_col;
     std::vector<std::shared_ptr<Col>> sv_cols;
+
+    std::shared_ptr<SelectCol> sv_sel_col;
+    std::vector<std::shared_ptr<SelectCol>> sv_sel_cols;
+
+    AggFuncType sv_agg_type;
 
     std::shared_ptr<SetClause> sv_set_clause;
     std::vector<std::shared_ptr<SetClause>> sv_set_clauses;

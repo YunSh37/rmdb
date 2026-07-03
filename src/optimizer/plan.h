@@ -154,18 +154,51 @@ class ExplainPlan : public Plan
 class SortPlan : public Plan
 {
     public:
-        SortPlan(PlanTag tag, std::shared_ptr<Plan> subplan, TabCol sel_col, bool is_desc)
+        SortPlan(PlanTag tag, std::shared_ptr<Plan> subplan,
+                 std::vector<TabCol> sort_cols, std::vector<bool> is_desc, int limit)
         {
             Plan::tag = tag;
             subplan_ = std::move(subplan);
-            sel_col_ = sel_col;
-            is_desc_ = is_desc;
+            sort_cols_ = std::move(sort_cols);
+            is_desc_ = std::move(is_desc);
+            limit_ = limit;
         }
         ~SortPlan(){}
         std::shared_ptr<Plan> subplan_;
-        TabCol sel_col_;
-        bool is_desc_;
-        
+        std::vector<TabCol> sort_cols_;  // 多列排序
+        std::vector<bool> is_desc_;      // 每列排序方向
+        int limit_;                       // LIMIT 值（-1=无）
+};
+
+/** 聚合执行计划 */
+class AggregationPlan : public Plan
+{
+    public:
+        AggregationPlan(std::shared_ptr<Plan> subplan,
+                        std::vector<int> agg_types,
+                        std::vector<TabCol> agg_targets,
+                        std::vector<TabCol> group_by_cols,
+                        std::vector<Condition> having_conds,
+                        std::vector<TabCol> output_cols,
+                        std::vector<ColMeta> output_meta)
+        {
+            Plan::tag = T_Projection;  // 复用 Projection tag
+            subplan_ = std::move(subplan);
+            agg_types_ = std::move(agg_types);
+            agg_targets_ = std::move(agg_targets);
+            group_by_cols_ = std::move(group_by_cols);
+            having_conds_ = std::move(having_conds);
+            output_cols_ = std::move(output_cols);
+            output_meta_ = std::move(output_meta);
+        }
+        ~AggregationPlan(){}
+        std::shared_ptr<Plan> subplan_;
+        std::vector<int> agg_types_;        // 聚合类型（与 output_cols 对应）
+        std::vector<TabCol> agg_targets_;   // 聚合目标列
+        std::vector<TabCol> group_by_cols_; // 分组列
+        std::vector<Condition> having_conds_; // HAVING 条件
+        std::vector<TabCol> output_cols_;   // 输出列定义
+        std::vector<ColMeta> output_meta_;  // 输出列元数据
 };
 
 // dml语句，包括insert; delete; update; select语句　

@@ -46,31 +46,162 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         auto& aliases = x->aliases;
 
         // 处理target list，在此阶段解析别名引用
-        for (auto &sv_sel_col : x->cols) {
-            std::string tab_name = sv_sel_col->tab_name;
-            // 如果列的表名是别名，解析为真实表名
-            auto alias_it = aliases.find(tab_name);
-            if (alias_it != aliases.end()) {
-                tab_name = alias_it->second;
+        bool has_agg = false;
+        for (auto &sv_sel_col : x->sel_cols) {
+            if (sv_sel_col->expr_type == ast::SelectCol::COLUMN) {
+                // 普通列引用
+                std::string tab_name = sv_sel_col->col->tab_name;
+                auto alias_it = aliases.find(tab_name);
+                if (alias_it != aliases.end()) {
+                    tab_name = alias_it->second;
+                }
+                TabCol sel_col = {.tab_name = tab_name,
+                                  .col_name = sv_sel_col->col->col_name};
+                if (!sv_sel_col->alias.empty()) {
+                    sel_col.col_name = sv_sel_col->alias;
+                }
+                query->cols.push_back(sel_col);
+                query->agg_types.push_back(ast::AGG_NONE);
+                query->agg_targets.push_back(TabCol{});
+            } else if (sv_sel_col->expr_type == ast::SelectCol::AGGREGATE) {
+                // 聚合函数列
+                has_agg = true;
+                // 解析目标列
+                TabCol agg_target;
+                if (sv_sel_col->col != nullptr) {
+                    std::string tab_name = sv_sel_col->col->tab_name;
+                    auto alias_it = aliases.find(tab_name);
+                    if (alias_it != aliases.end()) {
+                        tab_name = alias_it->second;
+                    }
+                    agg_target = {.tab_name = tab_name,
+                                  .col_name = sv_sel_col->col->col_name};
+                }
+                // 输出列名：优先使用别名，否则使用聚合函数名
+                std::string out_name = sv_sel_col->alias;
+                if (out_name.empty()) {
+                    // 自动生成列名
+                    switch (sv_sel_col->agg_type) {
+                        case ast::AGG_MAX:  out_name = "MAX(" + (agg_target.col_name.empty() ? "" : agg_target.col_name) + ")"; break;
+                        case ast::AGG_MIN:  out_name = "MIN(" + (agg_target.col_name.empty() ? "" : agg_target.col_name) + ")"; break;
+                        case ast::AGG_COUNT: out_name = "COUNT(" + (agg_target.col_name.empty() ? "" : agg_target.col_name) + ")"; break;
+                        case ast::AGG_SUM:  out_name = "SUM(" + (agg_target.col_name.empty() ? "" : agg_target.col_name) + ")"; break;
+                        case ast::AGG_COUNT_STAR: out_name = "COUNT(*)"; break;
+                        default: out_name = "agg"; break;
+                    }
+                }
+                TabCol sel_col = {.tab_name = agg_target.tab_name, .col_name = out_name};
+                query->cols.push_back(sel_col);
+                query->agg_types.push_back(sv_sel_col->agg_type);
+                query->agg_targets.push_back(agg_target);
             }
-            TabCol sel_col = {.tab_name = tab_name, .col_name = sv_sel_col->col_name};
-            query->cols.push_back(sel_col);
         }
+        query->has_aggregate = has_agg;
 
         std::vector<ColMeta> all_cols;
         get_all_cols(query->tables, all_cols);
         if (query->cols.empty()) {
-            // select all columns
+            // select all columns（仅在既无普通列也无聚合列时）
             for (auto &col : all_cols) {
                 TabCol sel_col = {.tab_name = col.tab_name, .col_name = col.name};
                 query->cols.push_back(sel_col);
+                query->agg_types.push_back(ast::AGG_NONE);
+                query->agg_targets.push_back(TabCol{});
             }
         } else {
-            // infer table name from column name
-            for (auto &sel_col : query->cols) {
-                sel_col = check_column(all_cols, sel_col);  // 列元数据校验
+            // 校验非聚合列的存在性（聚合目标列在 executor 中处理）
+            for (size_t i = 0; i < query->cols.size(); i++) {
+                if (query->agg_types[i] == ast::AGG_NONE) {
+                    query->cols[i] = check_column(all_cols, query->cols[i]);
+                } else if (query->agg_types[i] != ast::AGG_COUNT_STAR) {
+                    // 校验并解析聚合目标列的表名
+                    query->agg_targets[i] = check_column(all_cols, query->agg_targets[i]);
+                }
             }
         }
+
+        // 处理 GROUP BY 子句
+        if (!x->group_by.empty()) {
+            for (auto& gb_col : x->group_by) {
+                std::string tab_name = gb_col->tab_name;
+                auto alias_it = aliases.find(tab_name);
+                if (alias_it != aliases.end()) {
+                    tab_name = alias_it->second;
+                }
+                TabCol tc = {.tab_name = tab_name, .col_name = gb_col->col_name};
+                tc = check_column(all_cols, tc);
+                query->group_by_cols.push_back(tc);
+            }
+        }
+
+        // 健壮性检查：有 GROUP BY 时，SELECT 中非聚合列必须在 GROUP BY 中
+        if (!query->group_by_cols.empty()) {
+            for (size_t i = 0; i < query->cols.size(); i++) {
+                if (query->agg_types[i] == ast::AGG_NONE) {
+                    bool found = false;
+                    for (auto& gb : query->group_by_cols) {
+                        if (gb.tab_name == query->cols[i].tab_name &&
+                            gb.col_name == query->cols[i].col_name) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        throw RMDBError("Column '" + query->cols[i].col_name +
+                            "' must appear in GROUP BY clause when used with aggregate functions");
+                    }
+                }
+            }
+        }
+        // 健壮性检查：有聚合函数但没有 GROUP BY 时，SELECT 列表中不能混用普通列和聚合列
+        if (has_agg && query->group_by_cols.empty()) {
+            for (size_t i = 0; i < query->cols.size(); i++) {
+                if (query->agg_types[i] == ast::AGG_NONE) {
+                    throw RMDBError("Column '" + query->cols[i].col_name +
+                        "' cannot appear in SELECT with aggregate functions without GROUP BY");
+                }
+            }
+        }
+
+        // 处理 HAVING 子句（条件中的列可以是分组列或聚合函数，此处暂不校验）
+        if (!x->having_conds.empty()) {
+            get_clause(x->having_conds, query->having_conds);
+            if (!aliases.empty()) {
+                for (auto& cond : query->having_conds) {
+                    auto it = aliases.find(cond.lhs_col.tab_name);
+                    if (it != aliases.end()) {
+                        cond.lhs_col.tab_name = it->second;
+                    }
+                    if (!cond.is_rhs_val) {
+                        auto it2 = aliases.find(cond.rhs_col.tab_name);
+                        if (it2 != aliases.end()) {
+                            cond.rhs_col.tab_name = it2->second;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 处理 ORDER BY 子句
+        if (x->has_order) {
+            for (size_t i = 0; i < x->order_cols.size(); i++) {
+                auto& oc = x->order_cols[i];
+                std::string tab_name = oc->tab_name;
+                auto alias_it = aliases.find(tab_name);
+                if (alias_it != aliases.end()) {
+                    tab_name = alias_it->second;
+                }
+                TabCol tc = {.tab_name = tab_name, .col_name = oc->col_name};
+                tc = check_column(all_cols, tc);
+                query->order_by_cols.push_back(tc);
+                bool desc = (i < x->order_dirs.size() && x->order_dirs[i] == ast::OrderBy_DESC);
+                query->order_by_desc.push_back(desc);
+            }
+        }
+
+        // 处理 LIMIT 子句
+        query->limit_count = x->limit_count;
+
         //处理where条件（含 JOIN ON 条件，已在解析器中合并）
         get_clause(x->conds, query->conds);
         // 解析条件中的别名引用（必须在 move 之前，用本地引用）
@@ -88,6 +219,8 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 }
             }
         }
+        // 健壮性检查：WHERE 条件中不能使用聚合函数（聚合函数只在 HAVING 中有效）
+        // 此检查在 check_clause 中进行，因为聚合函数不在 WHERE 列的元数据中
         check_clause(query->tables, query->conds);
 
         // 最后保存别名映射（EXPLAIN 显示用）

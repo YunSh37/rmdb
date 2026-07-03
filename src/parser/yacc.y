@@ -22,7 +22,7 @@ using namespace ast;
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN
+WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN MAX MIN COUNT SUM AS GROUP HAVING LIMIT
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -44,13 +44,22 @@ WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN
 %type <sv_str> tbName colName
 %type <sv_strs> colNameList
 %type <sv_col> col
-%type <sv_cols> colList selector
+%type <sv_cols> colList
+%type <sv_sel_cols> selector
 %type <sv_set_clause> setClause
 %type <sv_set_clauses> setClauses
 %type <sv_cond> condition
 %type <sv_conds> whereClause optWhereClause optOnClause
 %type <sv_orderby>  order_clause opt_order_clause
 %type <sv_orderby_dir> opt_asc_desc
+%type <sv_sel_col> aggFunc
+%type <sv_sel_col> selCol
+%type <sv_sel_cols> selColList
+%type <sv_str> optAlias
+%type <sv_cols> optGroupBy
+%type <sv_conds> optHaving havingClause
+%type <sv_cond> havingCondition
+%type <sv_int> optLimit
 %type <sv_setKnobType> set_knob_type
 %type <sv_from_clause> fromList tableRef
 
@@ -159,25 +168,30 @@ dml:
     {
         $$ = std::make_shared<UpdateStmt>($2, $4, $5);
     }
-    |   SELECT selector FROM fromList optWhereClause opt_order_clause
+    |   SELECT selector FROM fromList optWhereClause optGroupBy optHaving opt_order_clause optLimit
     {
-        // 合并 JOIN ON 条件和 WHERE 条件
         auto all_conds = $5;
         for (auto& jc : $4->join_conds) {
             all_conds.push_back(jc);
         }
-        auto stmt = std::make_shared<SelectStmt>($2, $4->tab_names, all_conds, $6);
+        auto stmt = std::make_shared<SelectStmt>($2, $4->tab_names, all_conds, $8);
         stmt->aliases = std::move($4->aliases);
+        stmt->group_by = $6;
+        stmt->having_conds = $7;
+        stmt->limit_count = $9;
         $$ = std::move(stmt);
     }
-    |   EXPLAIN SELECT selector FROM fromList optWhereClause opt_order_clause
+    |   EXPLAIN SELECT selector FROM fromList optWhereClause optGroupBy optHaving opt_order_clause optLimit
     {
         auto all_conds = $6;
         for (auto& jc : $5->join_conds) {
             all_conds.push_back(jc);
         }
-        auto select_stmt = std::make_shared<SelectStmt>($3, $5->tab_names, all_conds, $7);
+        auto select_stmt = std::make_shared<SelectStmt>($3, $5->tab_names, all_conds, $9);
         select_stmt->aliases = std::move($5->aliases);
+        select_stmt->group_by = $7;
+        select_stmt->having_conds = $8;
+        select_stmt->limit_count = $10;
         $$ = std::make_shared<ExplainStmt>(std::move(select_stmt));
     }
     ;
@@ -342,6 +356,119 @@ expr:
     }
     ;
 
+/** SELECT 列表项：聚合函数 或 普通列 */
+selColList:
+        selCol
+    {
+        $$ = std::vector<std::shared_ptr<SelectCol>>{$1};
+    }
+    |   selColList ',' selCol
+    {
+        $$.push_back($3);
+    }
+    ;
+
+selCol:
+        aggFunc optAlias
+    {
+        $$ = $1;
+        if (!$2.empty()) $$->alias = $2;
+    }
+    |   col optAlias
+    {
+        auto sc = std::make_shared<SelectCol>($1);
+        if (!$2.empty()) sc->alias = $2;
+        $$ = sc;
+    }
+    ;
+
+optAlias:
+        AS IDENTIFIER { $$ = $2; }
+    |   /* epsilon */ { $$ = ""; }
+    ;
+
+/** 聚合函数 */
+aggFunc:
+        MAX '(' col ')'
+    {
+        $$ = std::make_shared<SelectCol>(AGG_MAX, $3);
+    }
+    |   MIN '(' col ')'
+    {
+        $$ = std::make_shared<SelectCol>(AGG_MIN, $3);
+    }
+    |   SUM '(' col ')'
+    {
+        $$ = std::make_shared<SelectCol>(AGG_SUM, $3);
+    }
+    |   COUNT '(' col ')'
+    {
+        $$ = std::make_shared<SelectCol>(AGG_COUNT, $3);
+    }
+    |   COUNT '(' '*' ')'
+    {
+        $$ = std::make_shared<SelectCol>(AGG_COUNT_STAR, nullptr);
+    }
+    ;
+
+/** GROUP BY 子句（可选） */
+optGroupBy:
+        GROUP BY colNameList
+    {
+        std::vector<std::shared_ptr<Col>> cols;
+        for (auto& name : $3) {
+            cols.push_back(std::make_shared<Col>("", name));
+        }
+        $$ = cols;
+    }
+    |   /* epsilon */ { $$ = std::vector<std::shared_ptr<Col>>(); }
+    ;
+
+/** HAVING 子句（可选） */
+optHaving:
+        HAVING havingClause { $$ = $2; }
+    |   /* epsilon */ { $$ = std::vector<std::shared_ptr<ast::BinaryExpr>>(); }
+    ;
+
+havingClause:
+        havingCondition
+    {
+        $$ = std::vector<std::shared_ptr<ast::BinaryExpr>>{$1};
+    }
+    |   havingClause AND havingCondition
+    {
+        $$.push_back($3);
+    }
+    ;
+
+havingCondition:
+        col op expr
+    {
+        $$ = std::make_shared<ast::BinaryExpr>($1, $2, $3);
+    }
+    |   aggFunc op value
+    {
+        // 将聚合函数转换为伪列：col_name = 聚合函数表达式
+        std::string pseudo_col;
+        switch ($1->agg_type) {
+            case ast::AGG_MAX:  pseudo_col = "MAX(" + ($1->col ? $1->col->col_name : "") + ")"; break;
+            case ast::AGG_MIN:  pseudo_col = "MIN(" + ($1->col ? $1->col->col_name : "") + ")"; break;
+            case ast::AGG_COUNT: pseudo_col = "COUNT(" + ($1->col ? $1->col->col_name : "") + ")"; break;
+            case ast::AGG_SUM:  pseudo_col = "SUM(" + ($1->col ? $1->col->col_name : "") + ")"; break;
+            case ast::AGG_COUNT_STAR: pseudo_col = "COUNT(*)"; break;
+            default: pseudo_col = "agg"; break;
+        }
+        auto col_ref = std::make_shared<ast::Col>("", pseudo_col);
+        $$ = std::make_shared<ast::BinaryExpr>(col_ref, $2, std::static_pointer_cast<ast::Expr>($3));
+    }
+    ;
+
+/** LIMIT 子句（可选） */
+optLimit:
+        LIMIT VALUE_INT { $$ = $2; }
+    |   /* epsilon */ { $$ = -1; }
+    ;
+
 setClauses:
         setClause
     {
@@ -363,9 +490,9 @@ setClause:
 selector:
         '*'
     {
-        $$ = {};
+        $$ = {};  // 空列表表示 SELECT *
     }
-    |   colList
+    |   selColList
     ;
 
 /** 单个表引用：表名 [别名] */
@@ -418,19 +545,28 @@ fromList:
 
 
 opt_order_clause:
-    ORDER BY order_clause      
-    { 
-        $$ = $3; 
+    ORDER BY order_clause
+    {
+        $$ = $3;
     }
-    |   /* epsilon */ { /* ignore*/ }
+    |   /* epsilon */ { $$ = nullptr; }
     ;
 
 order_clause:
-      col  opt_asc_desc 
-    { 
-        $$ = std::make_shared<OrderBy>($1, $2);
+      col opt_asc_desc
+    {
+        $$ = std::make_shared<OrderBy>(
+            std::vector<std::shared_ptr<Col>>{$1},
+            std::vector<OrderByDir>{$2}
+        );
     }
-    ;   
+    | order_clause ',' col opt_asc_desc
+    {
+        $1->cols.push_back($3);
+        $1->orderby_dirs.push_back($4);
+        $$ = $1;
+    }
+    ;
 
 opt_asc_desc:
     ASC          { $$ = OrderBy_ASC;     }

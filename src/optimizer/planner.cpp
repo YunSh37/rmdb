@@ -155,6 +155,16 @@ std::shared_ptr<Plan> Planner::physical_optimization(std::shared_ptr<Query> quer
 {
     std::shared_ptr<Plan> plan = make_one_rel(query);
 
+    // 如果有聚合函数，在 scan/filter 之上插入 AggregationPlan
+    if (query->has_aggregate) {
+        plan = generate_aggregation_plan(query, std::move(plan));
+    }
+
+    // 处理 HAVING：在 AggregationPlan 之上添加 FilterPlan
+    if (!query->having_conds.empty()) {
+        plan = std::make_shared<FilterPlan>(std::move(plan), query->having_conds);
+    }
+
     // 处理orderby
     plan = generate_sort_plan(query, std::move(plan));
 
@@ -217,7 +227,7 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
     // 判断是否为 SELECT *（用 AST 判断，不能用 sel_cols，因为分析器已把 * 展开为全部列名）
     bool is_select_star = false;
     if (auto select_stmt = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse)) {
-        is_select_star = select_stmt->cols.empty();
+        is_select_star = select_stmt->sel_cols.empty();
     }
 
     // ================================================================
@@ -339,10 +349,90 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
 }
 
 
+/**
+ * @brief 生成聚合执行计划
+ * 在子计划（scan + filter）之上插入 AggregationPlan
+ */
+std::shared_ptr<Plan> Planner::generate_aggregation_plan(std::shared_ptr<Query> query, std::shared_ptr<Plan> plan)
+{
+    std::vector<ColMeta> all_cols;
+    for (auto& tab_name : query->tables) {
+        const auto& tab_cols = sm_manager_->db_.get_table(tab_name).cols;
+        all_cols.insert(all_cols.end(), tab_cols.begin(), tab_cols.end());
+    }
+
+    // 构建输出列和元数据
+    std::vector<TabCol> output_cols;
+    std::vector<ColMeta> output_meta;
+    size_t curr_offset = 0;
+
+    // 先输出 GROUP BY 列
+    for (auto& gb : query->group_by_cols) {
+        output_cols.push_back(gb);
+        // 查找列元数据
+        for (auto& col : all_cols) {
+            if (col.tab_name == gb.tab_name && col.name == gb.col_name) {
+                ColMeta meta = col;
+                meta.offset = curr_offset;
+                curr_offset += meta.len;
+                output_meta.push_back(meta);
+                break;
+            }
+        }
+    }
+
+    // 再输出聚合结果列
+    for (size_t i = 0; i < query->cols.size(); i++) {
+        if (query->agg_types[i] != ast::AGG_NONE) {
+            TabCol out_col = query->cols[i];
+            output_cols.push_back(out_col);
+
+            // 确定聚合结果类型
+            ColType agg_result_type = TYPE_INT;  // COUNT 默认为 INT
+            int agg_len = sizeof(int);
+
+            int agg_type = query->agg_types[i];
+            if (agg_type == ast::AGG_COUNT || agg_type == ast::AGG_COUNT_STAR) {
+                agg_result_type = TYPE_INT;
+                agg_len = sizeof(int);
+            } else {
+                // MAX/MIN/SUM: 结果类型与目标列相同
+                for (auto& col : all_cols) {
+                    if (col.tab_name == query->agg_targets[i].tab_name &&
+                        col.name == query->agg_targets[i].col_name) {
+                        agg_result_type = col.type;
+                        agg_len = col.len;
+                        break;
+                    }
+                }
+            }
+
+            ColMeta meta;
+            meta.tab_name = out_col.tab_name;
+            meta.name = out_col.col_name;
+            meta.type = agg_result_type;
+            meta.len = agg_len;
+            meta.offset = curr_offset;
+            curr_offset += agg_len;
+            output_meta.push_back(meta);
+        }
+    }
+
+    return std::make_shared<AggregationPlan>(
+        std::move(plan),
+        query->agg_types,
+        query->agg_targets,
+        query->group_by_cols,
+        query->having_conds,
+        std::move(output_cols),
+        std::move(output_meta)
+    );
+}
+
 std::shared_ptr<Plan> Planner::generate_sort_plan(std::shared_ptr<Query> query, std::shared_ptr<Plan> plan)
 {
     auto x = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse);
-    if(!x->has_sort) {
+    if(!x->has_order || x->order_cols.empty()) {
         return plan;
     }
     std::vector<std::string> tables = query->tables;
@@ -352,13 +442,21 @@ std::shared_ptr<Plan> Planner::generate_sort_plan(std::shared_ptr<Query> query, 
         const auto &sel_tab_cols = sm_manager_->db_.get_table(sel_tab_name).cols;
         all_cols.insert(all_cols.end(), sel_tab_cols.begin(), sel_tab_cols.end());
     }
-    TabCol sel_col;
-    for (auto &col : all_cols) {
-        if(col.name.compare(x->order->cols->col_name) == 0 )
-        sel_col = {.tab_name = col.tab_name, .col_name = col.name};
+    // 解析 ORDER BY 多列
+    std::vector<TabCol> sort_cols;
+    std::vector<bool> sort_desc;
+    for (size_t i = 0; i < x->order_cols.size(); i++) {
+        auto& oc = x->order_cols[i];
+        for (auto &col : all_cols) {
+            if(col.name.compare(oc->col_name) == 0) {
+                sort_cols.push_back({.tab_name = col.tab_name, .col_name = col.name});
+                sort_desc.push_back(i < x->order_dirs.size() && x->order_dirs[i] == ast::OrderBy_DESC);
+                break;
+            }
+        }
     }
-    return std::make_shared<SortPlan>(T_Sort, std::move(plan), sel_col, 
-                                    x->order->orderby_dir == ast::OrderBy_DESC);
+    return std::make_shared<SortPlan>(T_Sort, std::move(plan), sort_cols, sort_desc,
+                                      x->limit_count);
 }
 
 
@@ -381,7 +479,7 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
 
     // 检测是否为 SELECT * 查询（用于 EXPLAIN 显示 [*]）
     if (auto select_stmt = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse)) {
-        if (select_stmt->cols.empty()) {
+        if (select_stmt->sel_cols.empty()) {
             proj_plan->is_star_ = true;
         }
     }

@@ -25,6 +25,7 @@ See the Mulan PSL v2 for more details. */
 #include "execution/executor_update.h"
 #include "execution/executor_insert.h"
 #include "execution/executor_delete.h"
+#include "execution/executor_aggregation.h"
 #include "execution/execution_sort.h"
 #include "common/common.h"
 
@@ -139,11 +140,42 @@ class Portal
         } else if (auto x = std::dynamic_pointer_cast<ScanPlan>(plan)) {
             ss << prefix << "Scan(table=" << x->tab_name_ << ")\n";  // 始终用真实表名
         } else if (auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
-            ss << prefix << "Sort(column=";
-            ss << display_name(x->sel_col_.tab_name) << ".";
-            ss << x->sel_col_.col_name;
-            if (x->is_desc_) ss << ",DESC";
-            ss << ")\n";
+            ss << prefix << "Sort(columns=[";
+            for (size_t i = 0; i < x->sort_cols_.size(); i++) {
+                if (i > 0) ss << ",";
+                ss << display_name(x->sort_cols_[i].tab_name) << ".";
+                ss << x->sort_cols_[i].col_name;
+                if (i < x->is_desc_.size() && x->is_desc_[i]) ss << ",DESC";
+            }
+            if (x->limit_ > 0) ss << ",limit=" << x->limit_;
+            ss << "])\n";
+            explain_plan(x->subplan_, indent + 1, ss, aliases);
+        } else if (auto x = std::dynamic_pointer_cast<AggregationPlan>(plan)) {
+            ss << prefix << "Aggregation(agg=[";
+            bool first_agg = true;
+            for (size_t i = 0; i < x->agg_types_.size(); i++) {
+                if (x->agg_types_[i] == ast::AGG_NONE) continue;
+                if (!first_agg) ss << ",";
+                first_agg = false;
+                switch (x->agg_types_[i]) {
+                    case ast::AGG_MAX:  ss << "MAX"; break;
+                    case ast::AGG_MIN:  ss << "MIN"; break;
+                    case ast::AGG_COUNT: ss << "COUNT"; break;
+                    case ast::AGG_SUM:  ss << "SUM"; break;
+                    case ast::AGG_COUNT_STAR: ss << "COUNT(*)"; break;
+                }
+                if (x->agg_types_[i] != ast::AGG_COUNT_STAR && i < x->agg_targets_.size()) {
+                    ss << "(" << x->agg_targets_[i].col_name << ")";
+                }
+            }
+            if (!x->group_by_cols_.empty()) {
+                ss << "],group_by=[";
+                for (size_t i = 0; i < x->group_by_cols_.size(); i++) {
+                    if (i > 0) ss << ",";
+                    ss << x->group_by_cols_[i].col_name;
+                }
+            }
+            ss << "])\n";
             explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<DMLPlan>(plan)) {
             if (x->subplan_) explain_plan(x->subplan_, indent, ss, aliases);
@@ -309,7 +341,13 @@ class Portal
             return join;
         } else if(auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             return std::make_unique<SortExecutor>(convert_plan_executor(x->subplan_, context),
-                                            x->sel_col_, x->is_desc_);
+                                            std::move(x->sort_cols_), std::move(x->is_desc_), x->limit_);
+        } else if(auto x = std::dynamic_pointer_cast<AggregationPlan>(plan)) {
+            return std::make_unique<AggregationExecutor>(
+                convert_plan_executor(x->subplan_, context),
+                x->agg_types_, x->agg_targets_,
+                x->group_by_cols_, x->having_conds_,
+                x->output_meta_);
         } else if(auto x = std::dynamic_pointer_cast<FilterPlan>(plan)) {
             // FilterPlan: 直接返回子节点的 executor（条件已在 ScanPlan 中处理）
             return convert_plan_executor(x->subplan_, context);

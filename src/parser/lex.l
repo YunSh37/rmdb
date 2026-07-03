@@ -89,6 +89,15 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "ASC" { return ASC; }
 "ENABLE_NESTLOOP" { return ENABLE_NESTLOOP; }
 "ENABLE_SORTMERGE" { return ENABLE_SORTMERGE; }
+"MAX"       { return MAX; }
+"MIN"       { return MIN; }
+"COUNT"     { return COUNT; }
+"SUM"       { return SUM; }
+"AS"        { return AS; }
+"GROUP"     { return GROUP; }
+"HAVING"    { return HAVING; }
+"LIMIT"     { return LIMIT; }
+"DESC"      { return DESC; }
 "TRUE" { 
     yylval->sv_bool = true;
     return VALUE_BOOL; 

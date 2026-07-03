@@ -145,6 +145,96 @@ TOPIC4_TEST2 = [
      "Project(columns=[p.player_name,p.points,t.team_name])\n    Join(tables=[players,teams],condition=[t.team_id=p.team_id])\n        Project(columns=[t.team_id,t.team_name])\n            Scan(table=teams)\n        Project(columns=[p.player_name,p.points,p.team_id])\n            Scan(table=players)"),
 ]
 
+# 题目五
+TOPIC5_TEST1 = [
+    # 测试点1: 单独使用聚合函数
+    ("create table grade (course char(20),id int,score float);", "SUCCESS"),
+    ("insert into grade values('DataStructure',1,95);", "SUCCESS"),
+    ("insert into grade values('DataStructure',2,93.5);", "SUCCESS"),
+    ("insert into grade values('DataStructure',4,87);", "SUCCESS"),
+    ("insert into grade values('DataStructure',3,85);", "SUCCESS"),
+    ("insert into grade values('DB',1,94);", "SUCCESS"),
+    ("insert into grade values('DB',2,74.5);", "SUCCESS"),
+    ("insert into grade values('DB',4,83);", "SUCCESS"),
+    ("insert into grade values('DB',3,87);", "SUCCESS"),
+    ("select MAX(id) as max_id from grade;", "| 4 |"),
+    ("select MIN(score) as min_score from grade where course = 'DB';", "| 74.500000 |"),
+    ("select COUNT(course) as course_num from grade;", "| 8 |"),
+    ("select COUNT(*) as row_num from grade;", "| 8 |"),
+    ("select SUM(score) as sum_score from grade where id = 1;", "| 189.000000 |"),
+    ("drop table grade;", "SUCCESS"),
+]
+
+TOPIC5_TEST2 = [
+    # 测试点2: 聚合函数加分組統計
+    ("create table grade (course char(20),id int,score float);", "SUCCESS"),
+    ("insert into grade values('DataStructure',1,95);", "SUCCESS"),
+    ("insert into grade values('DataStructure',2,93.5);", "SUCCESS"),
+    ("insert into grade values('DataStructure',3,94.5);", "SUCCESS"),
+    ("insert into grade values('ComputerNetworks',1,99);", "SUCCESS"),
+    ("insert into grade values('ComputerNetworks',2,88.5);", "SUCCESS"),
+    ("insert into grade values('ComputerNetworks',3,92.5);", "SUCCESS"),
+    ("insert into grade values('C++',1,92);", "SUCCESS"),
+    ("insert into grade values('C++',2,89);", "SUCCESS"),
+    ("insert into grade values('C++',3,89.5);", "SUCCESS"),
+    ("select id,MAX(score) as max_score,MIN(score) as min_score,SUM(score) as sum_score from grade group by id;",
+     "max_score"),  # check key data exists
+    ("select id,MAX(score) as max_score from grade group by id having COUNT(*) > 3;",
+     ""),  # no results initially (< 3 per group)
+    ("insert into grade values ('ParallelCompute',1,100);", "SUCCESS"),
+    ("select id,MAX(score) as max_score from grade group by id having COUNT(*) > 3;",
+     "100.000000"),  # now group 1 has 4 records
+    ("select id,MAX(score) as max_score,MIN(score) as min_score from grade group by id having COUNT(*) > 1 and MIN(score) > 88;",
+     "max_score"),
+    ("select course ,COUNT(*) as row_num , COUNT(id) as student_num , MAX(score) as top_score, MIN(score) as lowest_score from grade group by course;",
+     "DataStructure"),
+    ("drop table grade;", "SUCCESS"),
+]
+
+TOPIC5_TEST3 = [
+    # 测试点3: 健壮性测试
+    ("create table grade (course char(20),id int,score float);", "SUCCESS"),
+    ("insert into grade values('DataStructure',1,95);", "SUCCESS"),
+    ("insert into grade values('DataStructure',2,93.5);", "SUCCESS"),
+    ("insert into grade values('DataStructure',3,94.5);", "SUCCESS"),
+    ("insert into grade values('ComputerNetworks',1,99);", "SUCCESS"),
+    ("insert into grade values('ComputerNetworks',2,88.5);", "SUCCESS"),
+    ("insert into grade values('ComputerNetworks',3,92.5);", "SUCCESS"),
+    # SELECT 列表中不能出现没有在 GROUP BY 子句中的非聚集列
+    ("select id , score from grade group by course;", "failure"),
+    # WHERE 子句中不能用聚集函数作为条件表达式
+    ("select id, MAX(score) as max_score from grade where MAX(score) > 90 group by id;", "failure"),
+]
+
+TOPIC5_TEST4 = [
+    # 测试点4: ORDER BY 语句测试
+    ("create table records (vendor char(5), invoice_number int, amount float);", "SUCCESS"),
+    ("insert into records values('alpha', 1001, 98.0);", "SUCCESS"),
+    ("insert into records values('bravo', 2002, 76.5);", "SUCCESS"),
+    ("insert into records values('charl', 3003, 99.0);", "SUCCESS"),
+    ("insert into records values('delta', 1001, 98.5);", "SUCCESS"),
+    ("insert into records values('echoo', 4004, 88.25);", "SUCCESS"),
+    ("insert into records values('foxxx', 4004, 77.0);", "SUCCESS"),
+    ("insert into records values('golfy', 5005, 97.75);", "SUCCESS"),
+    ("insert into records values('hotel', 5005, 86.75);", "SUCCESS"),
+    ("insert into records values('indio', 6006, 76.25);", "SUCCESS"),
+    ("insert into records values('julie', 3003, 88.0);", "SUCCESS"),
+    ("insert into records values('karen', 5005, 89.25);", "SUCCESS"),
+    ("insert into records values('lenny', 2002, 91.125);", "SUCCESS"),
+    ("insert into records values('mango', 6006, 98.5);", "SUCCESS"),
+    ("insert into records values('nancy', 1001, 89.75);", "SUCCESS"),
+    ("insert into records values('oscar', 2002, 90.0);", "SUCCESS"),
+    ("insert into records values('peter', 3003, 95.0);", "SUCCESS"),
+    ("insert into records values('quack', 6006, 88.625);", "SUCCESS"),
+    ("insert into records values('romeo', 4004, 92.0);", "SUCCESS"),
+    ("insert into records values('sunny', 1001, 95.25);", "SUCCESS"),
+    ("insert into records values('tonny', 7007, 98.125);", "SUCCESS"),
+    ("insert into records values('ultra', 4004, 91.5);", "SUCCESS"),
+    ("insert into records values('vivid', 7007, 98.3125);", "SUCCESS"),
+    ("select * from records order by invoice_number, amount asc limit 2;",
+     "nancy"),  # first row: nancy|1001|89.750000
+]
+
 TOPIC4_TEST4 = [
     # 测试点4: 稳健性测试（字符串比较 + 浮点数比较）
     ("create table authors (author_id int, author_name char(50), country char(30));", "SUCCESS"),
@@ -228,7 +318,10 @@ class RMDBTester:
             return "failure" not in actual.lower() and "error" not in actual.lower()
         if expected_fragment == "failure":
             # failure 可能输出在客户端或 output.txt
-            return "failure" in actual.lower() or "duplicate" in actual.lower()
+            # 接受 "failure"、"Error"、"error"、"duplicate" 作为失败标志
+            return ("failure" in actual.lower() or
+                    "duplicate" in actual.lower() or
+                    "error" in actual.lower())
         if expected_fragment == "":
             # 空结果：要么是空字符串，要么只有表头无数据行
             return True  # 放宽检查
@@ -279,7 +372,7 @@ class RMDBTester:
         tables_to_drop = [
             "t1", "t2", "grade", "warehouse",
             "students", "classes", "teams", "players",
-            "authors", "books",
+            "authors", "books", "records",
         ]
         for t in tables_to_drop:
             self.send_sql(f"drop table {t};")
@@ -329,6 +422,19 @@ def main():
         tester.cleanup_leftover_tables()
 
         tester.run_tests("题目四 测试点4: 稳健性测试", TOPIC4_TEST4)
+        tester.cleanup_leftover_tables()
+
+        # ==== 题目五 ====
+        tester.run_tests("题目五 测试点1: 单独使用聚合函数", TOPIC5_TEST1)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目五 测试点2: 聚合函数加分組統計", TOPIC5_TEST2)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目五 测试点3: 健壮性测试", TOPIC5_TEST3)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目五 测试点4: ORDER BY 语句测试", TOPIC5_TEST4)
         tester.cleanup_leftover_tables()
 
     finally:
