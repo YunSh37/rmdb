@@ -76,7 +76,13 @@ class UpdateExecutor : public AbstractExecutor {
                     throw ColumnNotFoundError(clause.lhs.col_name);
                 }
                 if (col_it->type != clause.rhs.type) {
-                    throw IncompatibleTypeError(coltype2str(col_it->type), coltype2str(clause.rhs.type));
+                    // 允许 INT→FLOAT 隐式转换（例如 SET score = 90，score 为 FLOAT）
+                    if (col_it->type == TYPE_FLOAT && clause.rhs.type == TYPE_INT) {
+                        clause.rhs.type = TYPE_FLOAT;
+                        clause.rhs.float_val = static_cast<float>(clause.rhs.int_val);
+                    } else {
+                        throw IncompatibleTypeError(coltype2str(col_it->type), coltype2str(clause.rhs.type));
+                    }
                 }
                 if (clause.rhs.raw == nullptr) {
                     Value val = clause.rhs;

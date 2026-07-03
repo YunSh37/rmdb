@@ -29,6 +29,7 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         query->conds = std::move(inner_query->conds);
         query->set_clauses = std::move(inner_query->set_clauses);
         query->values = std::move(inner_query->values);
+        query->aliases = std::move(inner_query->aliases);  // 传递别名映射
         query->parse = std::move(inner_query->parse);
         return query;
     }
@@ -36,19 +37,20 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
     {
         // 处理表名
         query->tables = std::move(x->tabs);
-        // 保存别名映射（EXPLAIN 显示用）
-        query->aliases = std::move(x->aliases);
         // 检查表是否存在
         for (auto& tab_name : query->tables) {
             sm_manager_->db_.get_table(tab_name);
         }
 
+        // 保存别名映射的本地引用（后续 move 前需要用它解析别名）
+        auto& aliases = x->aliases;
+
         // 处理target list，在此阶段解析别名引用
         for (auto &sv_sel_col : x->cols) {
             std::string tab_name = sv_sel_col->tab_name;
             // 如果列的表名是别名，解析为真实表名
-            auto alias_it = x->aliases.find(tab_name);
-            if (alias_it != x->aliases.end()) {
+            auto alias_it = aliases.find(tab_name);
+            if (alias_it != aliases.end()) {
                 tab_name = alias_it->second;
             }
             TabCol sel_col = {.tab_name = tab_name, .col_name = sv_sel_col->col_name};
@@ -71,22 +73,25 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         }
         //处理where条件（含 JOIN ON 条件，已在解析器中合并）
         get_clause(x->conds, query->conds);
-        // 解析条件中的别名引用
-        if (!x->aliases.empty()) {
+        // 解析条件中的别名引用（必须在 move 之前，用本地引用）
+        if (!aliases.empty()) {
             for (auto& cond : query->conds) {
-                auto it = x->aliases.find(cond.lhs_col.tab_name);
-                if (it != x->aliases.end()) {
+                auto it = aliases.find(cond.lhs_col.tab_name);
+                if (it != aliases.end()) {
                     cond.lhs_col.tab_name = it->second;
                 }
                 if (!cond.is_rhs_val) {
-                    auto it2 = x->aliases.find(cond.rhs_col.tab_name);
-                    if (it2 != x->aliases.end()) {
+                    auto it2 = aliases.find(cond.rhs_col.tab_name);
+                    if (it2 != aliases.end()) {
                         cond.rhs_col.tab_name = it2->second;
                     }
                 }
             }
         }
         check_clause(query->tables, query->conds);
+
+        // 最后保存别名映射（EXPLAIN 显示用）
+        query->aliases = std::move(aliases);
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
         // 检查表是否存在
         sm_manager_->db_.get_table(x->tab_name);
@@ -194,7 +199,16 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
             rhs_type = rhs_col->type;
         }
         if (lhs_type != rhs_type) {
-            throw IncompatibleTypeError(coltype2str(lhs_type), coltype2str(rhs_type));
+            // 允许 INT→FLOAT 隐式转换（例如 WHERE score > 90，score 为 FLOAT）
+            if (lhs_type == TYPE_FLOAT && rhs_type == TYPE_INT && cond.is_rhs_val) {
+                cond.rhs_val.type = TYPE_FLOAT;
+                cond.rhs_val.float_val = static_cast<float>(cond.rhs_val.int_val);
+            } else if (lhs_type == TYPE_INT && rhs_type == TYPE_FLOAT && cond.is_rhs_val) {
+                // INT 列与 FLOAT 值比较（不常见但也允许）
+                // rhs 已经是 FLOAT，不需要转换
+            } else {
+                throw IncompatibleTypeError(coltype2str(lhs_type), coltype2str(rhs_type));
+            }
         }
     }
 }

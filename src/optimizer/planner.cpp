@@ -162,7 +162,8 @@ std::shared_ptr<Plan> Planner::physical_optimization(std::shared_ptr<Query> quer
 }
 
 /**
- * @brief 收集指定表在查询中需要保留的列（用于投影下推）
+ * @brief 收集指定表在投影下推中需要保留的列
+ * 仅包含 SELECT 列 + JOIN 连接键列（不包含过滤条件列，因为 Filter 在 Project 之下）
  * @param tab_name 表名
  * @param sel_cols SELECT 列表
  * @param all_conds 所有条件（包含过滤和连接条件）
@@ -184,16 +185,18 @@ static std::vector<TabCol> get_needed_cols_for_table(
         }
     }
 
-    // 2. 所有条件中涉及该表的列（连接键 + 过滤条件中的列）
+    // 2. 仅连接条件（非过滤条件）涉及的列
+    //    过滤条件列不包含在 Project 中，因为 Filter 在 Project 之下已处理
     for (auto& cond : all_conds) {
-        // 左操作数
+        if (cond.is_rhs_val) continue;  // 跳过过滤条件
+        // 左操作数（连接键）
         if (cond.lhs_col.tab_name == tab_name &&
             added.find(cond.lhs_col.col_name) == added.end()) {
             needed.push_back(cond.lhs_col);
             added.insert(cond.lhs_col.col_name);
         }
-        // 右操作数（列引用）
-        if (!cond.is_rhs_val && cond.rhs_col.tab_name == tab_name &&
+        // 右操作数（连接键）
+        if (cond.rhs_col.tab_name == tab_name &&
             added.find(cond.rhs_col.col_name) == added.end()) {
             needed.push_back(cond.rhs_col);
             added.insert(cond.rhs_col.col_name);
@@ -240,17 +243,18 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
             scan = std::make_shared<ScanPlan>(T_IndexScan, sm_manager_, tables[i], curr_conds, index_col_names);
         }
 
-        // 投影下推：仅多表连接且非 SELECT * 时进行
+        // 选择下推：先包裹 FilterPlan（在 Scan 之上、Project 之下）
+        if (!curr_conds.empty()) {
+            scan = std::make_shared<FilterPlan>(scan, curr_conds);
+        }
+
+        // 投影下推：再包裹 ProjectionPlan（在 Filter 之上，仅多表连接且非 SELECT * 时）
         if (!is_select_star && tables.size() > 1) {
+            // 仅保留 SELECT + JOIN 列（不包含过滤条件列，因为 Filter 已处理）
             auto needed_cols = get_needed_cols_for_table(tables[i], sel_cols, all_conds);
             if (!needed_cols.empty()) {
                 scan = std::make_shared<ProjectionPlan>(T_Projection, scan, needed_cols);
             }
-        }
-
-        // 选择下推：如果有过滤条件，包裹 FilterPlan
-        if (!curr_conds.empty()) {
-            scan = std::make_shared<FilterPlan>(scan, curr_conds);
         }
 
         table_plans[i] = scan;
