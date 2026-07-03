@@ -44,9 +44,23 @@ venv/
 data.json
 reports/
 
+# === 项目文档（本地维护，不推送） ===
+测试说明文档v3.0.md
+测试说明文档v3.0 .pdf
+决赛性能测试SQL示例.pdf
+数据一致性检验规则.md
+数据一致性检验规则.pdf
+一致性检测2.pdf
+project_analysis.md
+project_structure.txt
+CLAUDE.md
+
 # === 测试输出 ===
 Testing/
 CTestTestfile.cmake
+
+# === 测试数据库（运行时生成） ===
+build/test_*_db/
 
 # === 第三方（如使用包管理器） ===
 # vcpkg/
