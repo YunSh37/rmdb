@@ -36,6 +36,8 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
     {
         // 处理表名
         query->tables = std::move(x->tabs);
+        // 保存别名映射（EXPLAIN 显示用）
+        query->aliases = std::move(x->aliases);
         // 检查表是否存在
         for (auto& tab_name : query->tables) {
             sm_manager_->db_.get_table(tab_name);

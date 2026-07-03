@@ -61,9 +61,9 @@ class Optimizer {
             return std::make_shared<SetKnobPlan>(x->set_knob_type_, x->bool_val_);
         } else {
             auto plan = planner_->do_planner(query, context);
-            // 如果是 EXPLAIN 查询，包装为 ExplainPlan
+            // 如果是 EXPLAIN 查询，包装为 ExplainPlan，同时传递别名映射
             if (query->is_explain) {
-                return std::make_shared<ExplainPlan>(std::move(plan));
+                return std::make_shared<ExplainPlan>(std::move(plan), query->aliases);
             }
             return plan;
         }

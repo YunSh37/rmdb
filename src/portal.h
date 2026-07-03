@@ -53,56 +53,81 @@ class Portal
    private:
     SmManager *sm_manager_;
 
-    /** 递归打印计划树（用于 EXPLAIN） */
-    void explain_plan(std::shared_ptr<Plan> plan, int indent, std::stringstream &ss) {
+    /** 递归打印计划树（用于 EXPLAIN）
+     *  @param aliases 别名映射：alias → real_table_name（反向查找用别名显示） */
+    void explain_plan(std::shared_ptr<Plan> plan, int indent, std::stringstream &ss,
+                       const std::map<std::string, std::string>& aliases = {}) {
         std::string prefix(indent, ' ');
+
+        // 构建反向映射：real_name → alias（用于 EXPLAIN 显示别名）
+        std::map<std::string, std::string> rev_alias;
+        for (auto& [alias, real] : aliases) {
+            rev_alias[real] = alias;
+        }
+
+        // 获取表名的显示名称（优先使用别名）
+        auto display_name = [&](const std::string& tab_name) -> std::string {
+            auto it = rev_alias.find(tab_name);
+            return (it != rev_alias.end()) ? it->second : tab_name;
+        };
 
         if (auto x = std::dynamic_pointer_cast<ProjectionPlan>(plan)) {
             ss << prefix << "Project(columns=[";
             if (x->is_star_) {
                 ss << "*";
             } else {
-                for (size_t i = 0; i < x->sel_cols_.size(); i++) {
+                // 按字母序排序后再显示
+                auto sorted_cols = x->sel_cols_;
+                std::sort(sorted_cols.begin(), sorted_cols.end(),
+                    [](const TabCol& a, const TabCol& b) {
+                        std::string da = a.tab_name + "." + a.col_name;
+                        std::string db = b.tab_name + "." + b.col_name;
+                        return da < db;
+                    });
+                for (size_t i = 0; i < sorted_cols.size(); i++) {
                     if (i > 0) ss << ",";
-                    if (!x->sel_cols_[i].tab_name.empty())
-                        ss << x->sel_cols_[i].tab_name << ".";
-                    ss << x->sel_cols_[i].col_name;
+                    std::string dname = display_name(sorted_cols[i].tab_name);
+                    if (!dname.empty())
+                        ss << dname << ".";
+                    ss << sorted_cols[i].col_name;
                 }
             }
             ss << "])\n";
-            explain_plan(x->subplan_, indent + 1, ss);
+            explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
             ss << prefix << "Join(tables=[";
             // 收集所有涉及的表名并按字母序排列
             std::vector<std::string> all_tabs;
             collect_tables(x, all_tabs);
-            std::sort(all_tabs.begin(), all_tabs.end());
-            for (size_t i = 0; i < all_tabs.size(); i++) {
+            // 转换为显示名称再排序
+            std::vector<std::string> display_tabs;
+            for (auto& t : all_tabs) {
+                display_tabs.push_back(display_name(t));
+            }
+            std::sort(display_tabs.begin(), display_tabs.end());
+            for (size_t i = 0; i < display_tabs.size(); i++) {
                 if (i > 0) ss << ",";
-                ss << all_tabs[i];
+                ss << display_tabs[i];
             }
             ss << "],condition=[";
             for (size_t i = 0; i < x->conds_.size(); i++) {
                 if (i > 0) ss << ",";
                 auto& cond = x->conds_[i];
-                if (!cond.lhs_col.tab_name.empty())
-                    ss << cond.lhs_col.tab_name << ".";
+                ss << display_name(cond.lhs_col.tab_name) << ".";
                 ss << cond.lhs_col.col_name;
                 ss << "=";  // join 条件始终是等值连接
-                if (!cond.rhs_col.tab_name.empty())
-                    ss << cond.rhs_col.tab_name << ".";
+                ss << display_name(cond.rhs_col.tab_name) << ".";
                 ss << cond.rhs_col.col_name;
             }
             ss << "])\n";
-            explain_plan(x->left_, indent + 1, ss);
-            explain_plan(x->right_, indent + 1, ss);
+            explain_plan(x->left_, indent + 1, ss, aliases);
+            explain_plan(x->right_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<FilterPlan>(plan)) {
             ss << prefix << "Filter(condition=[";
             for (size_t i = 0; i < x->conds_.size(); i++) {
                 if (i > 0) ss << ",";
                 auto& cond = x->conds_[i];
-                if (!cond.lhs_col.tab_name.empty())
-                    ss << cond.lhs_col.tab_name << ".";
+                ss << display_name(cond.lhs_col.tab_name) << ".";
                 ss << cond.lhs_col.col_name;
                 ss << comp_op_to_str(cond.op);
                 if (cond.is_rhs_val) {
@@ -115,19 +140,18 @@ class Portal
                 }
             }
             ss << "])\n";
-            explain_plan(x->subplan_, indent + 1, ss);
+            explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<ScanPlan>(plan)) {
-            ss << prefix << "Scan(table=" << x->tab_name_ << ")\n";
+            ss << prefix << "Scan(table=" << display_name(x->tab_name_) << ")\n";
         } else if (auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             ss << prefix << "Sort(column=";
-            if (!x->sel_col_.tab_name.empty())
-                ss << x->sel_col_.tab_name << ".";
+            ss << display_name(x->sel_col_.tab_name) << ".";
             ss << x->sel_col_.col_name;
             if (x->is_desc_) ss << ",DESC";
             ss << ")\n";
-            explain_plan(x->subplan_, indent + 1, ss);
+            explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<DMLPlan>(plan)) {
-            if (x->subplan_) explain_plan(x->subplan_, indent, ss);
+            if (x->subplan_) explain_plan(x->subplan_, indent, ss, aliases);
         }
     }
 
@@ -168,7 +192,7 @@ class Portal
         // EXPLAIN 处理：打印计划树并返回
         if (auto x = std::dynamic_pointer_cast<ExplainPlan>(plan)) {
             std::stringstream ss;
-            explain_plan(x->subplan_, 0, ss);
+            explain_plan(x->subplan_, 0, ss, x->aliases_);
             std::string plan_str = ss.str();
             memcpy(context->data_send_ + *(context->offset_), plan_str.c_str(), plan_str.length());
             *(context->offset_) = plan_str.length();

@@ -12,6 +12,7 @@ See the Mulan PSL v2 for more details. */
 
 #include <cassert>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,6 +37,9 @@ class Query{
     std::vector<Value> values;
     // 是否为 EXPLAIN 查询
     bool is_explain = false;
+
+    // 别名映射：alias → real_table_name（EXPLAIN 显示用）
+    std::map<std::string, std::string> aliases;
 
     Query(){}
 

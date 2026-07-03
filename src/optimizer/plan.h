@@ -139,13 +139,16 @@ class FilterPlan : public Plan
 class ExplainPlan : public Plan
 {
     public:
-        ExplainPlan(std::shared_ptr<Plan> subplan)
+        ExplainPlan(std::shared_ptr<Plan> subplan,
+                     std::map<std::string, std::string> aliases = {})
         {
             Plan::tag = T_Explain;
             subplan_ = std::move(subplan);
+            aliases_ = std::move(aliases);  // alias → real table name
         }
         ~ExplainPlan(){}
         std::shared_ptr<Plan> subplan_;
+        std::map<std::string, std::string> aliases_;  // 别名→真实表名（EXPLAIN 显示用）
 };
 
 class SortPlan : public Plan
