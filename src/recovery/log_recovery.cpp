@@ -47,7 +47,13 @@ void RecoveryManager::analyze() {
     int bytes_read = disk_manager_->read_log(log_data_.data(), file_size, 0);
     if (bytes_read <= 0) { redo_lsn_ = INVALID_LSN; return; }
 
-    // 单遍扫描：LSN→offset + ATT + DPT + 检查点
+    // ================================================================
+    // 阶段一：快速头部扫描
+    //   目的：(1) 建立 LSN→偏移 映射供 UNDO 使用
+    //         (2) 找到最后一个静态检查点
+    //         (3) 跟踪最大事务ID
+    //   本阶段不反序列化任何数据记录（仅读固定头部），也不操作 ATT/DPT
+    // ================================================================
     int scan_offset = 0;
     int last_checkpoint_offset = -1;
     int total_records = 0;
@@ -59,27 +65,104 @@ void RecoveryManager::analyze() {
         if (log_len == 0 || scan_offset + log_len > bytes_read) break;
         lsn_t lsn = *reinterpret_cast<const lsn_t*>(log_data_.data() + scan_offset + OFFSET_LSN);
         lsn_offsets_.emplace_back(lsn, scan_offset);
+
         txn_id_t tid = *reinterpret_cast<const txn_id_t*>(log_data_.data() + scan_offset + OFFSET_LOG_TID);
         if (tid != INVALID_TXN_ID && (max_txn_id_ == INVALID_TXN_ID || tid > max_txn_id_))
             max_txn_id_ = tid;
 
+        if (log_type == LogType::CHECKPOINT)
+            last_checkpoint_offset = scan_offset;
+
+        scan_offset += log_len;
+        total_records++;
+    }
+
+    // ================================================================
+    // 阶段二：解析检查点并初始化恢复状态
+    //   静态检查点的语义保证：创建检查点时已执行全量刷盘（flush_all_pages
+    //   + fsync），因此检查点 LSN 之前的所有数据修改都已持久化。
+    //
+    //   利用检查点数据：
+    //   - ATT：检查点记录的活动事务快照 → 作为 UNDO 的初始状态
+    //   - DPT：检查点记录的脏页快照 → 作为 REDO 的 DPT 基础
+    //   - REDO 起点：由于静态检查点保证全量刷盘，REDO 可从检查点 LSN
+    //     之后的第一个操作开始，跳过所有已持久化的操作
+    // ================================================================
+    lsn_t ckpt_lsn = INVALID_LSN;
+    int post_ckpt_offset = 0;  // 检查点之后第一条记录的偏移
+
+    if (last_checkpoint_offset >= 0) {
+        auto ckpt = std::make_unique<CheckpointLogRecord>();
+        ckpt->deserialize(log_data_.data() + last_checkpoint_offset);
+        checkpoint_lsn_ = ckpt->lsn_;
+        ckpt_lsn = ckpt->lsn_;
+
+        // 计算检查点之后第一条记录的偏移
+        uint32_t ckpt_log_len = *reinterpret_cast<const uint32_t*>(
+            log_data_.data() + last_checkpoint_offset + OFFSET_LOG_TOT_LEN);
+        post_ckpt_offset = last_checkpoint_offset + static_cast<int>(ckpt_log_len);
+
+        // 从检查点 ATT 初始化活跃事务表
+        for (auto& [tid, lsn] : ckpt->att_) {
+            att_[tid] = lsn;
+            if (tid > max_txn_id_) max_txn_id_ = tid;
+        }
+
+        // 从检查点 DPT 初始化脏页表（表名→fd 转换）
+        for (auto& [tab_name, page_no, lsn] : ckpt->dpt_entries_) {
+            int fd = get_file_fd_safe(tab_name);
+            if (fd < 0) continue;
+            PageId pid{fd, page_no};
+            if (dpt_.find(pid) == dpt_.end() || lsn < dpt_[pid])
+                dpt_[pid] = lsn;
+        }
+
+        // 静态检查点已全量刷盘 → REDO 从检查点之后开始
+        // 找到第一个 LSN > ckpt_lsn 的记录
+        redo_lsn_ = INVALID_LSN;
+        for (auto& [lsn, offset] : lsn_offsets_) {
+            if (lsn > ckpt_lsn) {
+                redo_lsn_ = lsn;
+                break;
+            }
+        }
+    }
+
+    // ================================================================
+    // 阶段三：增量扫描
+    //   有检查点 → 从检查点之后扫描，更新 ATT（新事务）和 DPT（新脏页）
+    //   无检查点 → 从日志开头全量扫描，建立 ATT 和 DPT
+    // ================================================================
+    int start_offset = (last_checkpoint_offset >= 0) ? post_ckpt_offset : 0;
+
+    while (start_offset < bytes_read) {
+        if (start_offset + LOG_HEADER_SIZE > bytes_read) break;
+        LogType log_type = *reinterpret_cast<const LogType*>(log_data_.data() + start_offset);
+        uint32_t log_len = *reinterpret_cast<const uint32_t*>(log_data_.data() + start_offset + OFFSET_LOG_TOT_LEN);
+        if (log_len == 0 || start_offset + log_len > bytes_read) break;
+        lsn_t lsn = *reinterpret_cast<const lsn_t*>(log_data_.data() + start_offset + OFFSET_LSN);
+        txn_id_t tid = *reinterpret_cast<const txn_id_t*>(log_data_.data() + start_offset + OFFSET_LOG_TID);
+
         switch (log_type) {
-            case LogType::begin:
+            case LogType::begin: {
                 att_[tid] = lsn;
                 break;
-            case LogType::commit:
+            }
+            case LogType::commit: {
                 att_.erase(tid);
                 break;
-            case LogType::ABORT:
+            }
+            case LogType::ABORT: {
                 att_.erase(tid);
                 aborted_txns_.insert(tid);
                 break;
+            }
             case LogType::CHECKPOINT:
-                last_checkpoint_offset = scan_offset;
                 break;
             case LogType::INSERT: {
                 att_[tid] = lsn;
-                InsertLogRecord rec; rec.deserialize(log_data_.data() + scan_offset);
+                InsertLogRecord rec;
+                rec.deserialize(log_data_.data() + start_offset);
                 int fd = get_file_fd_safe(rec.table_name_);
                 if (fd < 0) break;
                 PageId pid{fd, rec.rid_.page_no};
@@ -89,7 +172,8 @@ void RecoveryManager::analyze() {
             }
             case LogType::DELETE: {
                 att_[tid] = lsn;
-                DeleteLogRecord rec; rec.deserialize(log_data_.data() + scan_offset);
+                DeleteLogRecord rec;
+                rec.deserialize(log_data_.data() + start_offset);
                 int fd = get_file_fd_safe(rec.table_name_);
                 if (fd < 0) break;
                 PageId pid{fd, rec.rid_.page_no};
@@ -98,7 +182,8 @@ void RecoveryManager::analyze() {
             }
             case LogType::UPDATE: {
                 att_[tid] = lsn;
-                UpdateLogRecord rec; rec.deserialize(log_data_.data() + scan_offset);
+                UpdateLogRecord rec;
+                rec.deserialize(log_data_.data() + start_offset);
                 int fd = get_file_fd_safe(rec.table_name_);
                 if (fd < 0) break;
                 PageId pid{fd, rec.rid_.page_no};
@@ -106,37 +191,16 @@ void RecoveryManager::analyze() {
                 break;
             }
         }
-        scan_offset += log_len;
-        total_records++;
+        start_offset += log_len;
     }
 
-    // 检查点信息
-    lsn_t checkpoint_min_rec_lsn = INVALID_LSN;
-    if (last_checkpoint_offset >= 0) {
-        auto ckpt = std::make_unique<CheckpointLogRecord>();
-        ckpt->deserialize(log_data_.data() + last_checkpoint_offset);
-        checkpoint_lsn_ = ckpt->lsn_;
-        for (auto& [tab_name, page_no, lsn] : ckpt->dpt_entries_) {
-            if (lsn > 0 && (checkpoint_min_rec_lsn == INVALID_LSN || lsn < checkpoint_min_rec_lsn))
-                checkpoint_min_rec_lsn = lsn;
+    // 无检查点时，从 DPT 最小 LSN 开始 REDO（标准 ARIES 行为）
+    if (last_checkpoint_offset < 0) {
+        redo_lsn_ = INVALID_LSN;
+        for (auto& [pid, lsn] : dpt_) {
+            if (redo_lsn_ == INVALID_LSN || lsn < redo_lsn_)
+                redo_lsn_ = lsn;
         }
-    }
-
-    // 计算全量 DPT 最小 LSN
-    lsn_t full_dpt_min = INVALID_LSN;
-    for (auto& [pid, lsn] : dpt_)
-        if (full_dpt_min == INVALID_LSN || lsn < full_dpt_min) full_dpt_min = lsn;
-
-    // REDO 起点：使用检查点优化，从检查点 DPT 最小 rec_lsn 开始
-    // 检查点将所有脏页刷盘，rec_lsn < checkpoint_min_rec_lsn 的操作都已持久化
-    if (checkpoint_min_rec_lsn != INVALID_LSN) {
-        redo_lsn_ = checkpoint_min_rec_lsn;
-        printf("[Recovery::Analyze] REDO优化: 使用检查点 min_rec_lsn=%d (full=%d ckpt=%d)\n",
-               redo_lsn_, full_dpt_min, checkpoint_lsn_);
-    } else {
-        redo_lsn_ = full_dpt_min;
-        if (redo_lsn_ == INVALID_LSN && checkpoint_lsn_ != INVALID_LSN)
-            redo_lsn_ = checkpoint_lsn_;
     }
 
     printf("[Recovery::Analyze] 记录=%d条 ATT=%zu DPT=%zu redo_lsn=%d ckpt=%d\n",
