@@ -18,6 +18,18 @@ constexpr int RM_FILE_HDR_PAGE = 0;
 constexpr int RM_FIRST_RECORD_PAGE = 1;
 constexpr int RM_MAX_RECORD_SIZE = 512;
 
+// MVCC 头部大小（每个记录槽末尾）：xmin(4字节) + xmax(4字节) = 8字节
+constexpr int MVCC_HEADER_SIZE = sizeof(timestamp_t) * 2;
+
+/** MVCC 记录版本头部，存储在每条记录槽的末尾 */
+struct MvccHeader {
+    timestamp_t xmin_;  // 创建此版本的事务时间戳
+    timestamp_t xmax_;  // 删除此版本的事务时间戳（INT32_MAX表示未被删除）
+
+    MvccHeader() : xmin_(0), xmax_(0) {}
+    MvccHeader(timestamp_t xmin, timestamp_t xmax) : xmin_(xmin), xmax_(xmax) {}
+};
+
 /* 文件头，记录表数据文件的元信息，写入磁盘中文件的第0号页面 */
 struct RmFileHdr {
     int record_size;            // 表中每条记录的大小，由于不包含变长字段，因此当前字段初始化后保持不变

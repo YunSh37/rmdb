@@ -403,6 +403,185 @@ TOPIC7_ABORT_INDEX_TEST = [
 ]
 
 
+# ============================================================
+# 题目八: 多版本并发控制(MVCC)
+# 注意：并发测试（脏读、死锁等）需要C++测试文件，这里测试MVCC基础功能
+# ============================================================
+
+TOPIC8_MVCC_BASIC = [
+    # MVCC基础：创建表和索引
+    ("create table mvcc_test (id int, name char(8), score float);", "SUCCESS"),
+    # 插入记录（MVCC头自动设置：xmin=事务时间戳）
+    ("insert into mvcc_test values (1, 'alice', 90.0);", "SUCCESS"),
+    ("insert into mvcc_test values (2, 'bob', 85.0);", "SUCCESS"),
+    # 查询可见（mvcc可见性检查通过）
+    ("select * from mvcc_test;", "1|alice|90"),
+    ("select * from mvcc_test;", "2|bob|85"),
+]
+
+TOPIC8_MVCC_DELETE = [
+    # MVCC软删除测试
+    ("create table mvcc_del (id int, val int);", "SUCCESS"),
+    ("insert into mvcc_del values (1, 100);", "SUCCESS"),
+    ("insert into mvcc_del values (2, 200);", "SUCCESS"),
+    ("insert into mvcc_del values (3, 300);", "SUCCESS"),
+    # 软删除一条记录（设置xmax，不物理删除）
+    ("delete from mvcc_del where id = 2;", "SUCCESS"),
+    # SELECT应该只返回未删除的记录（MVCC可见性过滤掉xmax<=当前ts的）
+    ("select * from mvcc_del;", "1|100"),
+    ("select * from mvcc_del;", "3|300"),
+    # 确认被删除的记录不可见
+    ("select * from mvcc_del where id = 2;", ""),  # 空结果
+]
+
+TOPIC8_MVCC_UPDATE = [
+    # MVCC更新测试（xmin更新 + 数据变更）
+    ("create table mvcc_upd (id int, val int);", "SUCCESS"),
+    ("insert into mvcc_upd values (1, 100);", "SUCCESS"),
+    ("insert into mvcc_upd values (2, 200);", "SUCCESS"),
+    # 更新记录（xmin更新为当前事务时间戳）
+    ("update mvcc_upd set val = 999 where id = 1;", "SUCCESS"),
+    # 查询应看到更新后的值
+    ("select * from mvcc_upd where id = 1;", "1|999"),
+]
+
+TOPIC8_MVCC_TXN_COMMIT = [
+    # 事务提交后MVCC可见性
+    ("create table mvcc_txn (id int, val int);", "SUCCESS"),
+    ("insert into mvcc_txn values (1, 10);", "SUCCESS"),
+    # 显式事务：插入 + 提交
+    ("begin;", "SUCCESS"),
+    ("insert into mvcc_txn values (2, 20);", "SUCCESS"),
+    ("commit;", "SUCCESS"),
+    # 提交后数据可见
+    ("select * from mvcc_txn;", "1|10"),
+    ("select * from mvcc_txn;", "2|20"),
+]
+
+TOPIC8_MVCC_TXN_ABORT = [
+    # 事务回滚后MVCC可见性（软删除恢复）
+    ("create table mvcc_abt (id int, val int);", "SUCCESS"),
+    ("insert into mvcc_abt values (1, 10);", "SUCCESS"),
+    ("insert into mvcc_abt values (2, 20);", "SUCCESS"),
+    # 显式事务：删除 + 回滚
+    ("begin;", "SUCCESS"),
+    ("delete from mvcc_abt where id = 1;", "SUCCESS"),
+    ("update mvcc_abt set val = 888 where id = 2;", "SUCCESS"),
+    ("abort;", "SUCCESS"),
+    # 回滚后：数据恢复到事务前状态
+    ("select * from mvcc_abt;", "1|10"),
+    ("select * from mvcc_abt;", "2|20"),
+]
+
+TOPIC8_MVCC_INDEX = [
+    # MVCC + 唯一索引
+    ("create table mvcc_idx (id int, name char(8));", "SUCCESS"),
+    ("create index mvcc_idx(id);", "SUCCESS"),
+    ("insert into mvcc_idx values (1, 'first');", "SUCCESS"),
+    # 事务中插入 + 提交
+    ("begin;", "SUCCESS"),
+    ("insert into mvcc_idx values (2, 'second');", "SUCCESS"),
+    ("commit;", "SUCCESS"),
+    # 索引查询可见
+    ("select * from mvcc_idx where id = 1;", "1|first"),
+    ("select * from mvcc_idx where id = 2;", "2|second"),
+    # 事务中删除 + 回滚（含索引）
+    ("begin;", "SUCCESS"),
+    ("delete from mvcc_idx where id = 1;", "SUCCESS"),
+    ("abort;", "SUCCESS"),
+    # 回滚后索引查询可见
+    ("select * from mvcc_idx where id = 1;", "1|first"),
+]
+
+TOPIC8_MVCC_MULTI_DELETE_INSERT = [
+    # 多轮删除插入：验证slot未被重复使用导致可见性问题
+    ("create table mvcc_multi (id int, val int);", "SUCCESS"),
+    ("insert into mvcc_multi values (1, 100);", "SUCCESS"),
+    ("delete from mvcc_multi where id = 1;", "SUCCESS"),
+    # 软删除后插入新记录（在旧记录之后的新slot）
+    ("insert into mvcc_multi values (2, 200);", "SUCCESS"),
+    # 应该只看到新插入的记录
+    ("select * from mvcc_multi;", "2|200"),
+    # 软删除的记录不应该出现
+    ("select * from mvcc_multi where id = 1;", ""),
+]
+
+TOPIC8_SCAN_TEST = [
+    # 测试MVCC下的Scan基础功能
+    ("create table scan_test (id int, val int);", "SUCCESS"),
+    ("insert into scan_test values (1, 10);", "SUCCESS"),
+    ("insert into scan_test values (2, 20);", "SUCCESS"),
+    ("insert into scan_test values (3, 30);", "SUCCESS"),
+    # 全表扫描
+    ("select * from scan_test;", "1|10"),
+    ("select * from scan_test;", "2|20"),
+    ("select * from scan_test;", "3|30"),
+    # 条件扫描
+    ("select * from scan_test where id > 1;", "2|20"),
+    ("select * from scan_test where id > 1;", "3|30"),
+    # 事务内扫描（含软删除记录）
+    ("begin;", "SUCCESS"),
+    ("delete from scan_test where id = 2;", "SUCCESS"),
+    # 事务内扫描：不应看到已删除的记录
+    ("select * from scan_test;", "1|10"),
+    ("select * from scan_test;", "3|30"),
+    ("abort;", "SUCCESS"),
+    # abort后扫描：记录恢复
+    ("select * from scan_test;", "2|20"),
+]
+
+TOPIC8_TIMESTAMP_TEST = [
+    # 测试时间戳分配与管理
+    ("create table ts_test (id int, val int);", "SUCCESS"),
+    # 第一条插入
+    ("insert into ts_test values (1, 100);", "SUCCESS"),
+    # 事务内插入
+    ("begin;", "SUCCESS"),
+    ("insert into ts_test values (2, 200);", "SUCCESS"),
+    ("commit;", "SUCCESS"),
+    # 验证两条记录都可见（时间戳正确分配）
+    ("select * from ts_test;", "1|100"),
+    ("select * from ts_test;", "2|200"),
+    # 另一个事务插入
+    ("begin;", "SUCCESS"),
+    ("insert into ts_test values (3, 300);", "SUCCESS"),
+    ("select * from ts_test;", "3|300"),  # 自己插入的可见
+    ("commit;", "SUCCESS"),
+    # 验证所有记录
+    ("select * from ts_test;", "1|100"),
+    ("select * from ts_test;", "2|200"),
+    ("select * from ts_test;", "3|300"),
+]
+
+TOPIC8_TUPLE_RECONSTRUCT_TEST = [
+    # 测试根据版本链重构元组
+    ("create table tuple_test (id int, val int);", "SUCCESS"),
+    # 初始插入
+    ("insert into tuple_test values (1, 100);", "SUCCESS"),
+    # 事务内更新（在同一事务中可见自己的更新）
+    ("begin;", "SUCCESS"),
+    ("update tuple_test set val = 200 where id = 1;", "SUCCESS"),
+    # 事务内SELECT应看到更新后的值
+    ("select * from tuple_test where id = 1;", "1|200"),
+    ("commit;", "SUCCESS"),
+    # commit后其它事务可见
+    ("select * from tuple_test where id = 1;", "1|200"),
+    # 多轮更新
+    ("begin;", "SUCCESS"),
+    ("update tuple_test set val = 300 where id = 1;", "SUCCESS"),
+    ("abort;", "SUCCESS"),
+    # abort后应回滚到200
+    ("select * from tuple_test where id = 1;", "1|200"),
+    # 同一事务内多次更新
+    ("begin;", "SUCCESS"),
+    ("update tuple_test set val = 400 where id = 1;", "SUCCESS"),
+    ("update tuple_test set val = 500 where id = 1;", "SUCCESS"),
+    ("select * from tuple_test where id = 1;", "1|500"),
+    ("commit;", "SUCCESS"),
+    ("select * from tuple_test where id = 1;", "1|500"),
+]
+
+
 class RMDBTester:
     def __init__(self):
         self.sock = None
@@ -420,7 +599,7 @@ class RMDBTester:
         os.chdir(BUILD_DIR)
         self.server_proc = subprocess.Popen(
             ["./bin/rmdb", TEST_DB],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         os.chdir("..")
         time.sleep(0.5)  # 等待服务端启动
@@ -637,6 +816,10 @@ class RMDBTester:
             "authors", "books", "records",
             "departments", "employees", "projects", "empty_departments",
             "student", "student_idx", "student_idx2", "t",
+            # 题目八 MVCC 表
+            "mvcc_test", "mvcc_del", "mvcc_upd", "mvcc_txn", "mvcc_abt",
+            "mvcc_idx", "mvcc_multi",
+            "scan_test", "ts_test", "tuple_test",
         ]
         for t in tables_to_drop:
             self.send_sql(f"drop table {t};")
@@ -644,7 +827,7 @@ class RMDBTester:
 
 def main():
     print("=" * 60)
-    print("  RMDB 题目二/三/四 自动化测试")
+    print("  RMDB 题目二~八 自动化测试")
     print("=" * 60)
 
     tester = RMDBTester()
@@ -729,6 +912,39 @@ def main():
         # 含索引测试连续执行（共享不同的表名），中间不清理
         tester.run_tests("题目七 测试点3: 事务提交(含索引)", TOPIC7_COMMIT_INDEX_TEST)
         tester.run_tests("题目七 测试点4: 事务回滚(含索引)", TOPIC7_ABORT_INDEX_TEST)
+
+        tester.cleanup_leftover_tables()
+
+        # ==== 题目八: MVCC ====
+
+        tester.run_tests("题目八 测试点1: MVCC基础(INSERT+SELECT)", TOPIC8_MVCC_BASIC)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点2: MVCC软删除", TOPIC8_MVCC_DELETE)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点3: MVCC更新", TOPIC8_MVCC_UPDATE)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点4: 事务提交可见性", TOPIC8_MVCC_TXN_COMMIT)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点5: 事务回滚恢复(含软删除)", TOPIC8_MVCC_TXN_ABORT)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点6: MVCC+索引", TOPIC8_MVCC_INDEX)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点7: 多轮删除插入", TOPIC8_MVCC_MULTI_DELETE_INSERT)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点8: Scan基础", TOPIC8_SCAN_TEST)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点9: 时间戳管理", TOPIC8_TIMESTAMP_TEST)
+        tester.cleanup_leftover_tables()
+
+        tester.run_tests("题目八 测试点10: 元组重建", TOPIC8_TUPLE_RECONSTRUCT_TEST)
         tester.cleanup_leftover_tables()
 
         # ==== 数据一致性检验 ====

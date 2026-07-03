@@ -55,24 +55,41 @@ static void undo_insert(SmManager* sm, const std::string& tab_name, const Rid& r
     fh->delete_record(rid, nullptr);
 }
 
-/** 回滚 DELETE：重新插入记录及所有索引条目 */
+/** 回滚 DELETE：恢复记录的xmax为MAX（撤销软删除），重建索引条目 */
 static void undo_delete(SmManager* sm, const std::string& tab_name,
-                        const RmRecord& old_record, const Rid& /*old_rid*/) {
+                        const RmRecord& old_record, const Rid& old_rid) {
     auto& tab = sm->db_.get_table(tab_name);
     auto fh = sm->fhs_.at(tab_name).get();
 
-    // 重新插入数据记录
-    RmRecord rec_copy(old_record.size);
-    memcpy(rec_copy.data, old_record.data, old_record.size);
-    Rid new_rid = fh->insert_record(rec_copy.data, nullptr);
+    // 方法1：如果原slot还存在（软删除未清除bitmap），直接恢复xmax和索引
+    // 尝试在原rid上写回完整数据（含MVCC头，恢复xmax=MAX）
+    if (fh->is_record(old_rid)) {
+        // 原slot还在（软删除保留bitmap），写回old_record恢复MVCC头
+        fh->update_record(old_rid, old_record.data, nullptr);
+    } else {
+        // 原slot已被物理删除（物理删除场景），重新插入
+        RmRecord rec_copy(old_record.size);
+        memcpy(rec_copy.data, old_record.data, old_record.size);
+        Rid new_rid = fh->insert_record(rec_copy.data, nullptr);
+        // 重建索引（使用new_rid）
+        for (auto& index : tab.indexes) {
+            std::string ix_name = ensure_index_open(sm, tab_name, index.cols);
+            auto ih = sm->ihs_.at(ix_name).get();
+            char* key = new char[index.col_tot_len];
+            build_index_key(old_record, index, key);
+            ih->insert_entry(key, new_rid, nullptr);
+            delete[] key;
+        }
+        return;
+    }
 
-    // 重建所有索引条目
+    // 重建所有索引条目（指向原rid）
     for (auto& index : tab.indexes) {
         std::string ix_name = ensure_index_open(sm, tab_name, index.cols);
         auto ih = sm->ihs_.at(ix_name).get();
         char* key = new char[index.col_tot_len];
         build_index_key(old_record, index, key);
-        ih->insert_entry(key, new_rid, nullptr);
+        ih->insert_entry(key, old_rid, nullptr);
         delete[] key;
     }
 }
@@ -122,9 +139,10 @@ static void undo_update(SmManager* sm, const std::string& tab_name,
 Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manager) {
     // 1. 判断传入事务参数是否为空指针
     if (txn == nullptr) {
-        // 2. 为空指针，创建新事务，分配新事务ID
+        // 2. 为空指针，创建新事务，分配新事务ID和时间戳
         txn_id_t txn_id = next_txn_id_.fetch_add(1);
         txn = new Transaction(txn_id);
+        txn->set_start_ts(next_timestamp_.fetch_add(1));
     }
     // 3. 把事务加入到全局事务表中
     std::unique_lock<std::mutex> lock(latch_);
@@ -147,8 +165,13 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
         write_set->pop_front();
         delete wr;
     }
-    // 2. 释放所有锁
-    txn->get_lock_set()->clear();
+    // 2. 释放所有锁（遍历lock_set逐一unlock）
+    auto lock_set = txn->get_lock_set();
+    for (auto it = lock_set->begin(); it != lock_set->end(); ) {
+        LockDataId lid = *it;
+        it = lock_set->erase(it);
+        lock_manager_->unlock(txn, lid);
+    }
     // 3. 清空索引相关资源
     txn->get_index_latch_page_set()->clear();
     txn->get_index_deleted_page_set()->clear();
@@ -188,8 +211,13 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         delete wr;
     }
 
-    // 2. 释放所有锁
-    txn->get_lock_set()->clear();
+    // 2. 释放所有锁（遍历lock_set逐一unlock）
+    auto lock_set = txn->get_lock_set();
+    for (auto it = lock_set->begin(); it != lock_set->end(); ) {
+        LockDataId lid = *it;
+        it = lock_set->erase(it);
+        lock_manager_->unlock(txn, lid);
+    }
     // 3. 清空索引相关资源
     txn->get_index_latch_page_set()->clear();
     txn->get_index_deleted_page_set()->clear();

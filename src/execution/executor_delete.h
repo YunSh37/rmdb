@@ -38,9 +38,20 @@ class DeleteExecutor : public AbstractExecutor {
     }
 
     std::unique_ptr<RmRecord> Next() override {
+        // 申请表级IX锁（意向排他锁）——仅显式事务需要加锁
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_IX_on_table(context_->txn_, fh_->GetFd());
+        }
+
         // 遍历删除所有匹配的记录
         for (auto& rid : rids_) {
+            // 获取行级X锁（排他锁）——仅显式事务需要加锁
+            if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+                context_->lock_mgr_->lock_exclusive_on_record(context_->txn_, rid, fh_->GetFd());
+            }
+
             // 删除前读取记录，保存到 WriteRecord（用于事务回滚）
+            // get_record 返回完整slot（用户数据+MVCC头）
             auto rec = fh_->get_record(rid, context_);
             if (context_->txn_ != nullptr) {
                 auto wr = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec);
@@ -65,8 +76,14 @@ class DeleteExecutor : public AbstractExecutor {
                 ih->delete_entry(key, context_->txn_);
                 delete[] key;
             }
-            // 从数据文件中删除记录
-            fh_->delete_record(rid, context_);
+
+            // MVCC软删除：设置xmax（保留bitmap和物理存储）
+            if (context_->txn_ != nullptr) {
+                fh_->soft_delete_record(rid, context_->txn_->get_start_ts(), context_);
+            } else {
+                // 无事务上下文，执行物理删除
+                fh_->delete_record(rid, context_);
+            }
         }
         return nullptr;
     }

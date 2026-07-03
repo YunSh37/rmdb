@@ -167,6 +167,11 @@ class IndexScanExecutor : public AbstractExecutor {
 
     void beginTuple() override {
         is_end_ = false;
+        // 申请表级IS锁（意向共享锁）——仅显式事务需要加锁
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_IS_on_table(context_->txn_, fh_->GetFd());
+        }
+
         // 获取已打开的索引文件句柄（由sm_manager_统一管理生命周期）
         std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_meta_.cols);
         if (sm_manager_->ihs_.count(ix_name) == 0) {
@@ -278,6 +283,17 @@ class IndexScanExecutor : public AbstractExecutor {
 
         while (scan_ != nullptr && !scan_->is_end()) {
             rid_ = scan_->rid();
+            // MVCC可见性检查
+            if (context_->txn_ != nullptr) {
+                if (!fh_->is_visible(rid_, context_->txn_->get_start_ts())) {
+                    scan_->next();
+                    continue;
+                }
+                // 对可见记录获取行级S锁——仅显式事务需要加锁
+                if (context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+                    context_->lock_mgr_->lock_shared_on_record(context_->txn_, rid_, fh_->GetFd());
+                }
+            }
             // 从数据文件读取记录
             auto record = fh_->get_record(rid_, context_);
             // 检查是否满足所有条件

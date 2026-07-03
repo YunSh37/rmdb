@@ -39,7 +39,12 @@ class InsertExecutor : public AbstractExecutor {
     };
 
     std::unique_ptr<RmRecord> Next() override {
-        // Make record buffer
+        // 申请表级IX锁（意向排他锁）——仅显式事务需要加锁
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_IX_on_table(context_->txn_, fh_->GetFd());
+        }
+
+        // Make record buffer（包含MVCC头部空间，共record_size字节）
         RmRecord rec(fh_->get_file_hdr().record_size);
         for (size_t i = 0; i < values_.size(); i++) {
             auto &col = tab_.cols[i];
@@ -57,6 +62,17 @@ class InsertExecutor : public AbstractExecutor {
             memcpy(rec.data + col.offset, val.raw->data, col.len);
         }
 
+        // 初始化MVCC头部（存储在record末尾）
+        int user_size = fh_->get_user_record_size();
+        MvccHeader* mvcc_hdr = reinterpret_cast<MvccHeader*>(rec.data + user_size);
+        if (context_->txn_ != nullptr) {
+            mvcc_hdr->xmin_ = context_->txn_->get_start_ts();
+            mvcc_hdr->xmax_ = INT32_MAX;  // 未被删除
+        } else {
+            mvcc_hdr->xmin_ = 0;
+            mvcc_hdr->xmax_ = INT32_MAX;
+        }
+
         // 唯一索引约束检查：插入前检查所有索引是否有重复键
         for (size_t i = 0; i < tab_.indexes.size(); ++i) {
             auto& index = tab_.indexes[i];
@@ -66,7 +82,7 @@ class InsertExecutor : public AbstractExecutor {
                 sm_manager_->ihs_.emplace(ix_name, sm_manager_->get_ix_manager()->open_index(tab_name_, index.cols));
             }
             auto ih = sm_manager_->ihs_.at(ix_name).get();
-            // 构建索引键
+            // 构建索引键（仅使用用户数据部分）
             char* key = new char[index.col_tot_len];
             int offset = 0;
             for (int j = 0; j < index.col_num; ++j) {
@@ -82,7 +98,7 @@ class InsertExecutor : public AbstractExecutor {
             delete[] key;
         }
 
-        // Insert into record file
+        // Insert into record file（rec.data包含用户数据+MVCC头）
         rid_ = fh_->insert_record(rec.data, context_);
 
         // 维护索引：将新记录插入所有索引
@@ -98,6 +114,11 @@ class InsertExecutor : public AbstractExecutor {
             }
             ih->insert_entry(key, rid_, context_->txn_);
             delete[] key;
+        }
+
+        // 获取行级X锁（排他锁）——仅显式事务需要加锁
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_exclusive_on_record(context_->txn_, rid_, fh_->GetFd());
         }
 
         // 记录写操作（用于事务回滚）

@@ -79,6 +79,8 @@ class RmManager {
                                   sizeof(file_handle->file_hdr_));
         // 缓冲区的所有页刷到磁盘，注意这句话必须写在close_file前面
         buffer_pool_manager_->flush_all_pages(file_handle->fd_);
+        // 丢弃缓冲池中该文件的所有页面，避免fd复用导致数据污染
+        buffer_pool_manager_->discard_all_pages(file_handle->fd_);
         disk_manager_->close_file(file_handle->fd_);
     }
 };

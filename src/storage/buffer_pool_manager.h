@@ -76,6 +76,9 @@ class BufferPoolManager {
 
     void flush_all_pages(int fd);
 
+    /** 丢弃缓冲池中所有属于指定fd的页面（写回脏页并释放frame） */
+    void discard_all_pages(int fd);
+
    private:
     bool find_victim_page(frame_id_t* frame_id);
 

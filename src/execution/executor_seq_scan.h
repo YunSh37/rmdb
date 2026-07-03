@@ -121,23 +121,44 @@ class SeqScanExecutor : public AbstractExecutor {
         is_end_ = true;
     }
 
+    /** 检查当前记录是否对当前事务可见（MVCC可见性），若可见且为显式事务则获取S锁 */
+    bool check_and_lock_visible() {
+        if (context_->txn_ == nullptr) return true;
+        timestamp_t txn_ts = context_->txn_->get_start_ts();
+        if (!fh_->is_visible(rid_, txn_ts)) return false;
+        // 对可见记录获取行级S锁——仅显式事务需要加锁
+        if (context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_shared_on_record(context_->txn_, rid_, fh_->GetFd());
+        }
+        return true;
+    }
+
     void beginTuple() override {
+        // 申请表级IS锁（意向共享锁）——仅显式事务需要加锁
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_IS_on_table(context_->txn_, fh_->GetFd());
+        }
+
         // 创建 RmScan 迭代器
         scan_ = std::make_unique<RmScan>(fh_);
         is_end_ = scan_->is_end();
-        // 定位到第一条满足 WHERE 条件的记录
+        // 定位到第一条满足条件的可见记录
         if (!is_end_) {
             rid_ = scan_->rid();
-            // 检查当前记录是否满足条件
-            auto rec = fh_->get_record(rid_, context_);
-            if (!eval_conds(*rec)) {
+            // 检查MVCC可见性并获取S锁，同时检查WHERE条件
+            if (!check_and_lock_visible()) {
                 nextTuple();
+            } else {
+                auto rec = fh_->get_record(rid_, context_);
+                if (!eval_conds(*rec)) {
+                    nextTuple();
+                }
             }
         }
     }
 
     void nextTuple() override {
-        // 向后扫描找到下一条满足条件的记录
+        // 向后扫描找到下一条满足条件的可见记录
         while (!scan_->is_end()) {
             scan_->next();
             if (scan_->is_end()) {
@@ -145,6 +166,10 @@ class SeqScanExecutor : public AbstractExecutor {
                 return;
             }
             rid_ = scan_->rid();
+            // 检查MVCC可见性并获取S锁
+            if (!check_and_lock_visible()) {
+                continue;
+            }
             auto rec = fh_->get_record(rid_, context_);
             if (eval_conds(*rec)) {
                 is_end_ = false;

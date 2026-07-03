@@ -65,10 +65,15 @@ class RmFileHandle {
     RmFileHdr get_file_hdr() { return file_hdr_; }
     int GetFd() { return fd_; }
 
+    /** 获取用户数据大小（不含MVCC头） */
+    int get_user_record_size() const { return file_hdr_.record_size - MVCC_HEADER_SIZE; }
+
     /* 判断指定位置上是否已经存在一条记录，通过Bitmap来判断 */
     bool is_record(const Rid &rid) const {
         RmPageHandle page_handle = fetch_page_handle(rid.page_no);
-        return Bitmap::is_set(page_handle.bitmap, rid.slot_no);  // page的slot_no位置上是否有record
+        bool result = Bitmap::is_set(page_handle.bitmap, rid.slot_no);
+        buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), false);  // 修复页面泄漏
+        return result;
     }
 
     std::unique_ptr<RmRecord> get_record(const Rid &rid, Context *context) const;
@@ -80,6 +85,20 @@ class RmFileHandle {
     void delete_record(const Rid &rid, Context *context);
 
     void update_record(const Rid &rid, char *buf, Context *context);
+
+    /* ============== MVCC 相关方法 ============== */
+
+    /** 读取记录的MVCC头部 */
+    MvccHeader get_mvcc_header(const Rid &rid) const;
+
+    /** 设置记录的MVCC头部 */
+    void set_mvcc_header(const Rid &rid, const MvccHeader &header);
+
+    /** MVCC可见性判断：记录是否对指定事务可见 */
+    bool is_visible(const Rid &rid, timestamp_t txn_ts) const;
+
+    /** 软删除：设置xmax而不清除bitmap（保留给旧版本读者） */
+    void soft_delete_record(const Rid &rid, timestamp_t xmax, Context *context);
 
     RmPageHandle create_new_page_handle();
 

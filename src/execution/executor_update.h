@@ -50,12 +50,22 @@ class UpdateExecutor : public AbstractExecutor {
     }
 
     std::unique_ptr<RmRecord> Next() override {
+        // 申请表级IX锁（意向排他锁）——仅显式事务需要加锁
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            context_->lock_mgr_->lock_IX_on_table(context_->txn_, fh_->GetFd());
+        }
+
         // 遍历所有需要更新的记录
         for (auto& rid : rids_) {
-            // 1. 读取当前记录
+            // 获取行级X锁（排他锁）——仅显式事务需要加锁
+            if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+                context_->lock_mgr_->lock_exclusive_on_record(context_->txn_, rid, fh_->GetFd());
+            }
+
+            // 1. 读取当前记录（包含用户数据+MVCC头）
             auto rec = fh_->get_record(rid, context_);
 
-            // 保存旧记录到 WriteRecord（用于事务回滚）
+            // 保存旧记录到 WriteRecord（用于事务回滚，包含旧MVCC头）
             if (context_->txn_ != nullptr) {
                 auto wr = new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, *rec);
                 context_->txn_->append_write_record(wr);
@@ -98,6 +108,14 @@ class UpdateExecutor : public AbstractExecutor {
                 } else {
                     memcpy(rec->data + col_it->offset, clause.rhs.raw->data, col_it->len);
                 }
+            }
+
+            // 3a. 更新MVCC头部：将xmin更新为当前事务时间戳（标记为新版本）
+            if (context_->txn_ != nullptr) {
+                int user_size = fh_->get_user_record_size();
+                MvccHeader* mvcc_hdr = reinterpret_cast<MvccHeader*>(rec->data + user_size);
+                mvcc_hdr->xmin_ = context_->txn_->get_start_ts();
+                // xmax保持不变（通常为INT32_MAX）
             }
 
             // 4. 维护索引：删除旧键，检查新键唯一性，插入新键
@@ -146,7 +164,7 @@ class UpdateExecutor : public AbstractExecutor {
                 delete[] new_key;
             }
 
-            // 5. 写回修改后的记录
+            // 5. 写回修改后的记录（包含用户数据+更新后的MVCC头）
             fh_->update_record(rid, rec->data, context_);
         }
         return nullptr;

@@ -23,7 +23,8 @@ std::unique_ptr<RmRecord> RmFileHandle::get_record(const Rid& rid, Context* cont
     if (!Bitmap::is_set(page_handle.bitmap, rid.slot_no)) {
         throw RecordNotFoundError(rid.page_no, rid.slot_no);
     }
-    // 3. 复制 slot 数据到新的 RmRecord
+    // 3. 复制完整 slot 数据（用户数据 + MVCC头部）到 RmRecord
+    //    用户数据通过列偏移访问，MVCC头部存储在record末尾8字节
     auto record = std::make_unique<RmRecord>(file_hdr_.record_size);
     char* slot = page_handle.get_slot(rid.slot_no);
     memcpy(record->data, slot, file_hdr_.record_size);
@@ -43,7 +44,7 @@ Rid RmFileHandle::insert_record(char* buf, Context* context) {
     RmPageHandle page_handle = create_page_handle();
     // 2. 在 page 中找到空闲 slot 位置
     int slot_no = Bitmap::first_bit(false, page_handle.bitmap, file_hdr_.num_records_per_page);
-    // 3. 将 buf 复制到空闲 slot 位置
+    // 3. 将 buf 完整复制到空闲 slot 位置（buf 包含用户数据 + MVCC头部，共 record_size 字节）
     char* slot = page_handle.get_slot(slot_no);
     memcpy(slot, buf, file_hdr_.record_size);
     // 4. 更新 bitmap 和 page_hdr
@@ -70,7 +71,7 @@ Rid RmFileHandle::insert_record(char* buf, Context* context) {
  * @param {char*} buf 要插入记录的数据
  */
 void RmFileHandle::insert_record(const Rid& rid, char* buf) {
-    // 直接写入指定位置（用于恢复等场景）
+    // 直接写入指定位置（用于恢复等场景），buf 包含完整slot（用户数据+MVCC头）
     RmPageHandle page_handle = fetch_page_handle(rid.page_no);
     char* slot = page_handle.get_slot(rid.slot_no);
     memcpy(slot, buf, file_hdr_.record_size);
@@ -119,7 +120,7 @@ void RmFileHandle::update_record(const Rid& rid, char* buf, Context* context) {
         buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), false);
         throw RecordNotFoundError(rid.page_no, rid.slot_no);
     }
-    // 3. 直接覆盖 slot 数据（record_size 不变）
+    // 3. 覆盖完整 slot 数据（包含用户数据+MVCC头部，共 record_size 字节）
     char* slot = page_handle.get_slot(rid.slot_no);
     memcpy(slot, buf, file_hdr_.record_size);
     buffer_pool_manager_->mark_dirty(page_handle.page);
@@ -194,4 +195,79 @@ void RmFileHandle::release_page_handle(RmPageHandle&page_handle) {
     int page_no = page_handle.page->get_page_id().page_no;
     page_handle.page_hdr->next_free_page_no = file_hdr_.first_free_page_no;
     file_hdr_.first_free_page_no = page_no;
+}
+
+/* ============ MVCC 相关方法 ============ */
+
+/**
+ * @description: 读取记录的MVCC头部（存储在slot末尾）
+ * @param {Rid&} rid 记录号
+ * @return {MvccHeader} MVCC头部
+ */
+MvccHeader RmFileHandle::get_mvcc_header(const Rid& rid) const {
+    RmPageHandle page_handle = fetch_page_handle(rid.page_no);
+    int user_size = file_hdr_.record_size - MVCC_HEADER_SIZE;
+    char* slot = page_handle.get_slot(rid.slot_no);
+    MvccHeader hdr = *reinterpret_cast<MvccHeader*>(slot + user_size);
+    buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), false);
+    return hdr;
+}
+
+/**
+ * @description: 设置记录的MVCC头部
+ * @param {Rid&} rid 记录号
+ * @param {MvccHeader&} header 要设置的MVCC头部
+ */
+void RmFileHandle::set_mvcc_header(const Rid& rid, const MvccHeader& header) {
+    RmPageHandle page_handle = fetch_page_handle(rid.page_no);
+    int user_size = file_hdr_.record_size - MVCC_HEADER_SIZE;
+    char* slot = page_handle.get_slot(rid.slot_no);
+    *reinterpret_cast<MvccHeader*>(slot + user_size) = header;
+    buffer_pool_manager_->mark_dirty(page_handle.page);
+    buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), true);
+}
+
+/**
+ * @description: MVCC可见性判断
+ * 记录对事务可见当且仅当：
+ *   1. xmin <= txn_ts（记录在事务开始前已创建）
+ *   2. xmax > txn_ts 或 xmax == INT32_MAX（记录未被删除，或删除发生在事务开始之后）
+ * @param {Rid&} rid 记录号
+ * @param {timestamp_t} txn_ts 事务的时间戳
+ * @return {bool} 是否可见
+ */
+bool RmFileHandle::is_visible(const Rid& rid, timestamp_t txn_ts) const {
+    MvccHeader hdr = get_mvcc_header(rid);
+    if (hdr.xmin_ > txn_ts) {
+        return false;  // 记录在事务开始后创建，不可见
+    }
+    if (hdr.xmax_ != INT32_MAX && hdr.xmax_ <= txn_ts) {
+        return false;  // 记录在事务开始前已被删除，不可见
+    }
+    return true;
+}
+
+/**
+ * @description: 软删除记录（设置xmax，保留bitmap和物理存储）
+ * 用于MVCC：旧版本读者仍可通过xmax看到此记录
+ * @param {Rid&} rid 要软删除的记录号
+ * @param {timestamp_t} xmax 删除时间戳
+ * @param {Context*} context
+ */
+void RmFileHandle::soft_delete_record(const Rid& rid, timestamp_t xmax, Context* context) {
+    // 1. 获取页面句柄
+    RmPageHandle page_handle = fetch_page_handle(rid.page_no);
+    // 2. 检查记录存在
+    if (!Bitmap::is_set(page_handle.bitmap, rid.slot_no)) {
+        buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), false);
+        throw RecordNotFoundError(rid.page_no, rid.slot_no);
+    }
+    // 3. 设置MVCC头部的xmax（软删除标记）
+    int user_size = file_hdr_.record_size - MVCC_HEADER_SIZE;
+    char* slot = page_handle.get_slot(rid.slot_no);
+    MvccHeader* hdr = reinterpret_cast<MvccHeader*>(slot + user_size);
+    hdr->xmax_ = xmax;
+    // 4. 不修改bitmap（保留物理存储给旧版本读者）
+    buffer_pool_manager_->mark_dirty(page_handle.page);
+    buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), true);
 }
