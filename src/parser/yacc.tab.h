@@ -97,15 +97,16 @@ extern int yydebug;
     GROUP = 298,                   /* GROUP  */
     HAVING = 299,                  /* HAVING  */
     LIMIT = 300,                   /* LIMIT  */
-    LEQ = 301,                     /* LEQ  */
-    NEQ = 302,                     /* NEQ  */
-    GEQ = 303,                     /* GEQ  */
-    T_EOF = 304,                   /* T_EOF  */
-    IDENTIFIER = 305,              /* IDENTIFIER  */
-    VALUE_STRING = 306,            /* VALUE_STRING  */
-    VALUE_INT = 307,               /* VALUE_INT  */
-    VALUE_FLOAT = 308,             /* VALUE_FLOAT  */
-    VALUE_BOOL = 309               /* VALUE_BOOL  */
+    SEMI = 301,                    /* SEMI  */
+    LEQ = 302,                     /* LEQ  */
+    NEQ = 303,                     /* NEQ  */
+    GEQ = 304,                     /* GEQ  */
+    T_EOF = 305,                   /* T_EOF  */
+    IDENTIFIER = 306,              /* IDENTIFIER  */
+    VALUE_STRING = 307,            /* VALUE_STRING  */
+    VALUE_INT = 308,               /* VALUE_INT  */
+    VALUE_FLOAT = 309,             /* VALUE_FLOAT  */
+    VALUE_BOOL = 310               /* VALUE_BOOL  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif

@@ -22,7 +22,7 @@ using namespace ast;
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN MAX MIN COUNT SUM AS GROUP HAVING LIMIT
+WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN MAX MIN COUNT SUM AS GROUP HAVING LIMIT SEMI
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -179,6 +179,10 @@ dml:
         stmt->group_by = $6;
         stmt->having_conds = $7;
         stmt->limit_count = $9;
+        stmt->is_semi_join = $4->is_semi_join;
+        if ($4->is_semi_join && !$4->tab_names.empty()) {
+            stmt->semi_left_table = $4->tab_names[0];
+        }
         $$ = std::move(stmt);
     }
     |   EXPLAIN SELECT selector FROM fromList optWhereClause optGroupBy optHaving opt_order_clause optLimit
@@ -192,6 +196,10 @@ dml:
         select_stmt->group_by = $7;
         select_stmt->having_conds = $8;
         select_stmt->limit_count = $10;
+        select_stmt->is_semi_join = $5->is_semi_join;
+        if ($5->is_semi_join && !$5->tab_names.empty()) {
+            select_stmt->semi_left_table = $5->tab_names[0];
+        }
         $$ = std::make_shared<ExplainStmt>(std::move(select_stmt));
     }
     ;
@@ -539,6 +547,17 @@ fromList:
         for (auto& cond : $4) {
             $1->join_conds.push_back(cond);
         }
+        $$ = $1;
+    }
+    |   fromList SEMI JOIN tableRef optOnClause
+    {
+        auto& dst = $1->tab_names;
+        dst.insert(dst.end(), $4->tab_names.begin(), $4->tab_names.end());
+        $1->aliases.insert($4->aliases.begin(), $4->aliases.end());
+        for (auto& cond : $5) {
+            $1->join_conds.push_back(cond);
+        }
+        $1->is_semi_join = true;
         $$ = $1;
     }
     ;

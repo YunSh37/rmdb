@@ -62,6 +62,10 @@ class Query{
     // ========== LIMIT ==========
     int limit_count = -1;  // -1 表示无 LIMIT
 
+    // ========== SEMI JOIN ==========
+    bool is_semi_join = false;         // 是否为 SEMI JOIN 查询
+    std::string semi_left_table;       // SEMI JOIN 左表名（用于验证右表列不被选择）
+
     Query(){}
 
 };
@@ -77,10 +81,12 @@ public:
     std::shared_ptr<Query> do_analyze(std::shared_ptr<ast::TreeNode> root);
 
 private:
-    TabCol check_column(const std::vector<ColMeta> &all_cols, TabCol target);
+    TabCol check_column(const std::vector<ColMeta> &all_cols, TabCol target,
+                        const std::string& preferred_tab = "");
     void get_all_cols(const std::vector<std::string> &tab_names, std::vector<ColMeta> &all_cols);
     void get_clause(const std::vector<std::shared_ptr<ast::BinaryExpr>> &sv_conds, std::vector<Condition> &conds);
-    void check_clause(const std::vector<std::string> &tab_names, std::vector<Condition> &conds);
+    void check_clause(const std::vector<std::string> &tab_names, std::vector<Condition> &conds,
+                      const std::string& preferred_tab = "");
     Value convert_sv_value(const std::shared_ptr<ast::Value> &sv_val);
     CompOp convert_sv_comp_op(ast::SvCompOp op);
 };

@@ -278,6 +278,33 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
     }
 
     // ================================================================
+    // 第2.5步：SEMI JOIN 特殊处理 — 左表必须为驱动表
+    // ================================================================
+    if (query->is_semi_join && tables.size() == 2) {
+        // 确定左表和右表在 tables 中的索引
+        int left_idx = 0;
+        int right_idx = 1;
+        if (tables[0] != query->semi_left_table) {
+            left_idx = 1;
+            right_idx = 0;
+        }
+
+        // 收集连接条件
+        std::vector<Condition> semi_join_conds;
+        for (auto& cond : query->conds) {
+            if (is_join_cond(cond)) {
+                semi_join_conds.push_back(cond);
+            }
+        }
+
+        // 构建 JoinPlan：左表在左，右表在右
+        auto join_plan = std::make_shared<JoinPlan>(
+            T_NestLoop, table_plans[left_idx], table_plans[right_idx], semi_join_conds);
+        join_plan->type = SEMI_JOIN;
+        return join_plan;
+    }
+
+    // ================================================================
     // 第3步：连接顺序优化 — 按表大小排序，构建左深连接树
     // ================================================================
     // 收集剩余的连接条件（query->conds 中只剩下跨表条件）

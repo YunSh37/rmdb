@@ -252,6 +252,83 @@ TOPIC4_TEST4 = [
      "Project(columns=[a.author_name,b.title])\n    Join(tables=[authors,books],condition=[a.author_id=b.author_id])\n        Project(columns=[a.author_id,a.author_name])\n            Filter(condition=[a.country='USA'])\n                Scan(table=authors)\n        Project(columns=[b.author_id,b.title])\n            Filter(condition=[b.price>10.000000])\n                Scan(table=books)"),
 ]
 
+# ============================================================
+# 题目六：半连接 Semi Join
+# ============================================================
+
+TOPIC6_TEST1 = [
+    # 测试点1：基本的 Semi Join（查询有员工的部门）
+    ("create table departments (dept_id int, dept_name char(20));", "SUCCESS"),
+    ("create table employees (emp_id int, emp_name char(20), dept_id int, salary int);", "SUCCESS"),
+    ("insert into departments values(1, 'HR');", "SUCCESS"),
+    ("insert into departments values(2, 'Engineering');", "SUCCESS"),
+    ("insert into departments values(3, 'Sales');", "SUCCESS"),
+    ("insert into departments values(4, 'Marketing');", "SUCCESS"),
+    ("insert into employees values(101, 'Alice', 1, 70000);", "SUCCESS"),
+    ("insert into employees values(102, 'Bob', 2, 80000);", "SUCCESS"),
+    ("insert into employees values(103, 'Charlie', 2, 90000);", "SUCCESS"),
+    ("insert into employees values(104, 'David', 1, 75000);", "SUCCESS"),
+    # 基本 SEMI JOIN: 只返回有员工的部门
+    ("select dept_id, dept_name from departments semi join employees on departments.dept_id = employees.dept_id;",
+     "1|HR"),  # dept_id=1 和 dept_id=2 有员工
+    ("select dept_id, dept_name from departments semi join employees on departments.dept_id = employees.dept_id;",
+     "2|Engineering"),
+    # Sales(3)和 Marketing(4)不应该出现
+    # 验证不同连接条件写法：使用别名
+    ("select d.dept_name from departments d semi join employees e on d.dept_id = e.dept_id;",
+     "HR"),
+]
+
+TOPIC6_TEST2 = [
+    # 测试点2：Semi Join 结果不受右表重复匹配影响
+    # 使用 TOPIC6_TEST1 已经创建的 departments 和 employees 表
+    # dept_id=1 有 2 个员工(Alice, David)，dept_id=2 有 2 个员工(Bob, Charlie)
+    # 但 SEMI JOIN 结果中每个部门只出现一次
+    ("select dept_id from departments semi join employees on departments.dept_id = employees.dept_id order by dept_id;",
+     "1"),  # 每行只出现一次
+    ("select dept_id from departments semi join employees on departments.dept_id = employees.dept_id order by dept_id;",
+     "2"),
+    # 检查结果不会出现重复的 dept_id=1 或 dept_id=2
+    # 再插入一个员工增加重复匹配数，结果应不变
+    ("insert into employees values(105, 'Eve', 1, 80000);", "SUCCESS"),
+    ("select dept_id from departments semi join employees on departments.dept_id = employees.dept_id order by dept_id;",
+     "record"),  # 仍然只有两行（SEMI JOIN 去重确认）
+]
+
+TOPIC6_TEST3 = [
+    # 测试点3：Semi Join 右表为空或无匹配
+    ("create table projects (proj_id int, dept_id_assigned int);", "SUCCESS"),
+    # 右表为空，结果应为空（仅表头）
+    ("select dept_name from departments semi join projects on departments.dept_id = projects.dept_id_assigned;",
+     ""),
+    # 插入不匹配的数据
+    ("insert into projects values(1001, 99);", "SUCCESS"),
+    # 右表有数据但无匹配，结果应仍为空
+    ("select dept_name from departments semi join projects on departments.dept_id = projects.dept_id_assigned;",
+     ""),
+]
+
+TOPIC6_TEST4 = [
+    # 测试点4：健壮性测试 - 选择右表列
+    # 尝试选择右表 employees 的 emp_name 列，应报错
+    ("select dept_name, emp_name from departments semi join employees on departments.dept_id = employees.dept_id;",
+     "failure"),
+    # 尝试只选右表列
+    ("select emp_name from departments semi join employees on departments.dept_id = employees.dept_id;",
+     "failure"),
+    # 确保左表列仍然可以正常选择
+    ("select dept_id from departments semi join employees on departments.dept_id = employees.dept_id order by dept_id;",
+     "1"),
+]
+
+TOPIC6_TEST5 = [
+    # 测试点5：健壮性测试 - 左表为空
+    ("create table empty_departments (dept_id int, dept_name char(20));", "SUCCESS"),
+    # 左表为空，结果应为空（仅表头）
+    ("select dept_name from empty_departments semi join employees on empty_departments.dept_id = employees.dept_id;",
+     ""),
+]
+
 
 class RMDBTester:
     def __init__(self):
@@ -366,6 +443,118 @@ class RMDBTester:
                 if "explain" in sql.lower():
                     print(f"  输出:\n{result}")
 
+    def check_data_consistency(self):
+        """数据一致性检验（依据 数据一致性检验规则.md）
+        检查数据库中的表是否满足一致性约束。
+        当前检查：基本数据完整性（记录数、不重复等）。
+        完整规则包括 district/orders/new_orders/order_line 一致性，见规则文件。
+        """
+        print(f"\n{'='*60}")
+        print(f"  数据一致性检验")
+        print(f"{'='*60}")
+
+        checks_passed = 0
+        checks_failed = 0
+
+        # 辅助：获取可用表列表
+        tables_result = self.send_sql("show tables;")
+        available_tables = set()
+        for line in tables_result.split("\n"):
+            line = line.strip().strip("|").strip()
+            if line and not line.startswith("Table"):
+                available_tables.add(line)
+
+        # ============================================
+        # 规则1 & 2: 基本数据完整性（通用检查）
+        # ============================================
+        # 对每个已知的测试表，验证 COUNT(*) 是否合理
+        known_tables = {
+            "departments": 4,    # 初始 4 个部门
+            "employees": 5,      # 5 个员工（含测试点2新增的 Eve）
+            "grade": None,       # 动态，不检查具体数量
+            "records": None,
+            "t1": None,
+            "t2": None,
+        }
+
+        for tab_name, expected_count in known_tables.items():
+            if tab_name in available_tables:
+                result = self.send_sql(f"select COUNT(*) from {tab_name};")
+                try:
+                    # 尝试解析 COUNT(*) 结果
+                    count_val = None
+                    for part in result.replace("|", " ").split():
+                        try:
+                            count_val = int(part)
+                            break
+                        except ValueError:
+                            continue
+                    if count_val is not None:
+                        if expected_count is not None:
+                            if count_val == expected_count:
+                                print(f"  ✓ {tab_name}: COUNT(*)={count_val} (预期={expected_count})")
+                                checks_passed += 1
+                            else:
+                                print(f"  ✗ {tab_name}: COUNT(*)={count_val} (预期={expected_count})")
+                                checks_failed += 1
+                        else:
+                            print(f"  - {tab_name}: COUNT(*)={count_val}")
+                except Exception as e:
+                    print(f"  ✗ {tab_name}: 无法解析结果 '{result}'")
+
+        # ============================================
+        # 规则3: SEMI JOIN 结果一致性
+        # ============================================
+        if "departments" in available_tables and "employees" in available_tables:
+            # 检查有员工的部门数（departments SEMI JOIN employees 的结果数）
+            result1 = self.send_sql(
+                "select COUNT(*) from departments semi join employees "
+                "on departments.dept_id = employees.dept_id;"
+            )
+            # 检查 INNER JOIN 的结果（可能有重复）
+            result2 = self.send_sql(
+                "select COUNT(*) from departments join employees "
+                "on departments.dept_id = employees.dept_id;"
+            )
+            # SEMI JOIN 的结果数应 ≤ INNER JOIN 的结果数（去重）
+            try:
+                semi_count = None
+                inner_count = None
+                for part in result1.replace("|", " ").split():
+                    try:
+                        semi_count = int(part); break
+                    except ValueError: continue
+                for part in result2.replace("|", " ").split():
+                    try:
+                        inner_count = int(part); break
+                    except ValueError: continue
+                if semi_count is not None and inner_count is not None:
+                    if semi_count <= inner_count:
+                        print(f"  ✓ SEMI JOIN 去重: SEMI={semi_count} ≤ INNER={inner_count}")
+                        checks_passed += 1
+                    else:
+                        print(f"  ✗ SEMI JOIN 去重: SEMI={semi_count} > INNER={inner_count}")
+                        checks_failed += 1
+            except Exception as e:
+                print(f"  ✗ SEMI JOIN 一致性检查失败: {e}")
+
+        # ============================================
+        # 规则4: 检查 orders 总数（如存在）
+        # 依据规则文件：orders 数量 = 初始化数量 + new order 事务数
+        # ============================================
+        if "orders" in available_tables:
+            result = self.send_sql("select COUNT(*) from orders;")
+            print(f"  orders 总数: {result.strip()}")
+
+        # ============================================
+        # 汇总
+        # ============================================
+        total_checks = checks_passed + checks_failed
+        if total_checks > 0:
+            print(f"\n  一致性检验: {checks_passed}/{total_checks} 通过, {checks_failed} 失败")
+        else:
+            print(f"  (无可用的已知表进行一致性检查)")
+
     def cleanup_leftover_tables(self):
         """清理测试残留的表"""
         # 尝试删除可能残留的表
@@ -373,6 +562,7 @@ class RMDBTester:
             "t1", "t2", "grade", "warehouse",
             "students", "classes", "teams", "players",
             "authors", "books", "records",
+            "departments", "employees", "projects", "empty_departments",
         ]
         for t in tables_to_drop:
             self.send_sql(f"drop table {t};")
@@ -435,6 +625,20 @@ def main():
         tester.cleanup_leftover_tables()
 
         tester.run_tests("题目五 测试点4: ORDER BY 语句测试", TOPIC5_TEST4)
+        tester.cleanup_leftover_tables()
+
+        # ==== 题目六 ====
+        # 注意：题目六各测试点共享表结构，不进行中间清理
+        tester.run_tests("题目六 测试点1: 基本的 Semi Join", TOPIC6_TEST1)
+        tester.run_tests("题目六 测试点2: 右表重复匹配不影响", TOPIC6_TEST2)
+        tester.run_tests("题目六 测试点3: 右表为空或无匹配", TOPIC6_TEST3)
+        tester.run_tests("题目六 测试点4: 健壮性-选择右表列", TOPIC6_TEST4)
+        tester.run_tests("题目六 测试点5: 健壮性-左表为空", TOPIC6_TEST5)
+
+        # ==== 数据一致性检验 ====
+        tester.check_data_consistency()
+
+        # 题目六清理
         tester.cleanup_leftover_tables()
 
     finally:

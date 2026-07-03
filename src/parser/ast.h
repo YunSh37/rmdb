@@ -15,7 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include <memory>
 
 enum JoinType {
-    INNER_JOIN, LEFT_JOIN, RIGHT_JOIN, FULL_JOIN
+    INNER_JOIN, LEFT_JOIN, RIGHT_JOIN, FULL_JOIN, SEMI_JOIN
 };
 
 namespace ast {
@@ -248,6 +248,7 @@ struct FromClause {
     std::vector<std::string> tab_names;                         // 真实表名列表
     std::map<std::string, std::string> aliases;                 // 别名 → 真实表名
     std::vector<std::shared_ptr<BinaryExpr>> join_conds;        // JOIN ON 条件
+    bool is_semi_join = false;                                  // 是否为 SEMI JOIN
 };
 
 struct SelectStmt : public TreeNode {
@@ -272,6 +273,10 @@ struct SelectStmt : public TreeNode {
 
     /** LIMIT 子句（-1 表示无 LIMIT） */
     int limit_count = -1;
+
+    /** SEMI JOIN 标志 */
+    bool is_semi_join = false;                           // 是否为 SEMI JOIN 查询
+    std::string semi_left_table;                          // SEMI JOIN 左表名（用于右表列校验）
 
     SelectStmt() = default;
     SelectStmt(std::vector<std::shared_ptr<SelectCol>> sel_cols_,

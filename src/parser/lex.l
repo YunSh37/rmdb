@@ -80,6 +80,7 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "INDEX" { return INDEX; }
 "AND" { return AND; }
 "JOIN" {return JOIN;}
+"SEMI" { return SEMI; }
 "EXIT" { return EXIT; }
 "EXPLAIN" { return EXPLAIN; }
 "HELP" { return HELP; }
@@ -97,7 +98,6 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "GROUP"     { return GROUP; }
 "HAVING"    { return HAVING; }
 "LIMIT"     { return LIMIT; }
-"DESC"      { return DESC; }
 "TRUE" { 
     yylval->sv_bool = true;
     return VALUE_BOOL; 

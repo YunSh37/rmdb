@@ -55,6 +55,10 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 if (alias_it != aliases.end()) {
                     tab_name = alias_it->second;
                 }
+                // SEMI JOIN：未指定表名的列默认解析为左表列，避免歧义
+                if (tab_name.empty() && x->is_semi_join && !x->semi_left_table.empty()) {
+                    tab_name = x->semi_left_table;
+                }
                 TabCol sel_col = {.tab_name = tab_name,
                                   .col_name = sv_sel_col->col->col_name};
                 if (!sv_sel_col->alias.empty()) {
@@ -98,24 +102,44 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         }
         query->has_aggregate = has_agg;
 
+        // 传播 SEMI JOIN 标志
+        query->is_semi_join = x->is_semi_join;
+        query->semi_left_table = x->semi_left_table;
+
         std::vector<ColMeta> all_cols;
         get_all_cols(query->tables, all_cols);
+
+        // SEMI JOIN 偏好表：列歧义时优先解析为左表
+        std::string preferred_tab = query->is_semi_join ? query->semi_left_table : "";
+
         if (query->cols.empty()) {
             // select all columns（仅在既无普通列也无聚合列时）
-            for (auto &col : all_cols) {
-                TabCol sel_col = {.tab_name = col.tab_name, .col_name = col.name};
-                query->cols.push_back(sel_col);
-                query->agg_types.push_back(ast::AGG_NONE);
-                query->agg_targets.push_back(TabCol{});
+            if (query->is_semi_join) {
+                // SEMI JOIN SELECT *：只选左表列
+                for (auto &col : all_cols) {
+                    if (col.tab_name == query->semi_left_table) {
+                        TabCol sel_col = {.tab_name = col.tab_name, .col_name = col.name};
+                        query->cols.push_back(sel_col);
+                        query->agg_types.push_back(ast::AGG_NONE);
+                        query->agg_targets.push_back(TabCol{});
+                    }
+                }
+            } else {
+                for (auto &col : all_cols) {
+                    TabCol sel_col = {.tab_name = col.tab_name, .col_name = col.name};
+                    query->cols.push_back(sel_col);
+                    query->agg_types.push_back(ast::AGG_NONE);
+                    query->agg_targets.push_back(TabCol{});
+                }
             }
         } else {
             // 校验非聚合列的存在性（聚合目标列在 executor 中处理）
             for (size_t i = 0; i < query->cols.size(); i++) {
                 if (query->agg_types[i] == ast::AGG_NONE) {
-                    query->cols[i] = check_column(all_cols, query->cols[i]);
+                    query->cols[i] = check_column(all_cols, query->cols[i], preferred_tab);
                 } else if (query->agg_types[i] != ast::AGG_COUNT_STAR) {
                     // 校验并解析聚合目标列的表名
-                    query->agg_targets[i] = check_column(all_cols, query->agg_targets[i]);
+                    query->agg_targets[i] = check_column(all_cols, query->agg_targets[i], preferred_tab);
                 }
             }
         }
@@ -191,6 +215,10 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 if (alias_it != aliases.end()) {
                     tab_name = alias_it->second;
                 }
+                // SEMI JOIN：未指定表名的列默认解析为左表列
+                if (tab_name.empty() && x->is_semi_join && !x->semi_left_table.empty()) {
+                    tab_name = x->semi_left_table;
+                }
                 TabCol tc = {.tab_name = tab_name, .col_name = oc->col_name};
                 tc = check_column(all_cols, tc);
                 query->order_by_cols.push_back(tc);
@@ -221,7 +249,16 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         }
         // 健壮性检查：WHERE 条件中不能使用聚合函数（聚合函数只在 HAVING 中有效）
         // 此检查在 check_clause 中进行，因为聚合函数不在 WHERE 列的元数据中
-        check_clause(query->tables, query->conds);
+        check_clause(query->tables, query->conds, preferred_tab);
+
+        // 健壮性检查：SEMI JOIN 不允许选择右表列
+        if (query->is_semi_join && !query->semi_left_table.empty()) {
+            for (auto& col : query->cols) {
+                if (col.tab_name != query->semi_left_table) {
+                    throw RMDBError("Cannot select columns from right table in SEMI JOIN");
+                }
+            }
+        }
 
         // 最后保存别名映射（EXPLAIN 显示用）
         query->aliases = std::move(aliases);
@@ -255,13 +292,26 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
 }
 
 
-TabCol Analyze::check_column(const std::vector<ColMeta> &all_cols, TabCol target) {
+TabCol Analyze::check_column(const std::vector<ColMeta> &all_cols, TabCol target,
+                              const std::string& preferred_tab) {
     if (target.tab_name.empty()) {
         // Table name not specified, infer table name from column name
         std::string tab_name;
         for (auto &col : all_cols) {
             if (col.name == target.col_name) {
                 if (!tab_name.empty()) {
+                    // 如果指定了偏好表且其中一个匹配项来自偏好表，优先使用偏好表
+                    if (!preferred_tab.empty()) {
+                        if (tab_name == preferred_tab) {
+                            // 当前 tab_name 就是 preferred，跳过另一个
+                            continue;
+                        }
+                        if (col.tab_name == preferred_tab) {
+                            // 新的匹配是 preferred，替换
+                            tab_name = col.tab_name;
+                            continue;
+                        }
+                    }
                     throw AmbiguousColumnError(target.col_name);
                 }
                 tab_name = col.tab_name;
@@ -308,16 +358,17 @@ void Analyze::get_clause(const std::vector<std::shared_ptr<ast::BinaryExpr>> &sv
     }
 }
 
-void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vector<Condition> &conds) {
+void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vector<Condition> &conds,
+                            const std::string& preferred_tab) {
     // auto all_cols = get_all_cols(tab_names);
     std::vector<ColMeta> all_cols;
     get_all_cols(tab_names, all_cols);
     // Get raw values in where clause
     for (auto &cond : conds) {
         // Infer table name from column name
-        cond.lhs_col = check_column(all_cols, cond.lhs_col);
+        cond.lhs_col = check_column(all_cols, cond.lhs_col, preferred_tab);
         if (!cond.is_rhs_val) {
-            cond.rhs_col = check_column(all_cols, cond.rhs_col);
+            cond.rhs_col = check_column(all_cols, cond.rhs_col, preferred_tab);
         }
         TabMeta &lhs_tab = sm_manager_->db_.get_table(cond.lhs_col.tab_name);
         auto lhs_col = lhs_tab.get_col(cond.lhs_col.col_name);

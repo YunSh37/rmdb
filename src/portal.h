@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "optimizer/plan.h"
 #include "execution/executor_abstract.h"
 #include "execution/executor_nestedloop_join.h"
+#include "execution/executor_semijoin.h"
 #include "execution/executor_projection.h"
 #include "execution/executor_seq_scan.h"
 #include "execution/executor_index_scan.h"
@@ -96,7 +97,8 @@ class Portal
             ss << "])\n";
             explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
-            ss << prefix << "Join(tables=[";
+            const char* join_type = (x->type == SEMI_JOIN) ? "SemiJoin" : "Join";
+            ss << prefix << join_type << "(tables=[";
             // 收集所有涉及的表名（真实表名）并按字母序排列
             std::vector<std::string> all_tabs;
             collect_tables(x, all_tabs);
@@ -335,10 +337,16 @@ class Portal
         } else if(auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
             std::unique_ptr<AbstractExecutor> left = convert_plan_executor(x->left_, context);
             std::unique_ptr<AbstractExecutor> right = convert_plan_executor(x->right_, context);
-            std::unique_ptr<AbstractExecutor> join = std::make_unique<NestedLoopJoinExecutor>(
-                                std::move(left),
-                                std::move(right), std::move(x->conds_));
-            return join;
+            if (x->type == SEMI_JOIN) {
+                // 半连接：使用 SemiJoinExecutor（仅输出左表列，找到匹配即停止）
+                return std::make_unique<SemiJoinExecutor>(
+                    std::move(left), std::move(right), std::move(x->conds_));
+            } else {
+                std::unique_ptr<AbstractExecutor> join = std::make_unique<NestedLoopJoinExecutor>(
+                                    std::move(left),
+                                    std::move(right), std::move(x->conds_));
+                return join;
+            }
         } else if(auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             return std::make_unique<SortExecutor>(convert_plan_executor(x->subplan_, context),
                                             std::move(x->sort_cols_), std::move(x->is_desc_), x->limit_);
