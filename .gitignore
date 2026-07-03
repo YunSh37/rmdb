@@ -1,0 +1,53 @@
+# === 构建产物 ===
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# === 二进制文件 ===
+bin/
+lib/
+
+# === IDE / 编辑器 ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === 数据库文件 ===
+*.db
+*.db-journal
+*.db-wal
+
+# === Python (脚本工具) ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# === Claude / 本地配置 ===
+.claude/
+data.json
+reports/
+
+# === 测试输出 ===
+Testing/
+CTestTestfile.cmake
+
+# === 第三方（如使用包管理器） ===
+# vcpkg/
+# _deps/
