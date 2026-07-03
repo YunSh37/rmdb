@@ -72,7 +72,7 @@ class Portal
             ss << "])\n";
             explain_plan(x->subplan_, indent + 1, ss);
         } else if (auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
-            ss << prefix << " Join(tables=[";
+            ss << prefix << "Join(tables=[";
             // 收集所有涉及的表名并按字母序排列
             std::vector<std::string> all_tabs;
             collect_tables(x, all_tabs);
@@ -97,7 +97,7 @@ class Portal
             explain_plan(x->left_, indent + 1, ss);
             explain_plan(x->right_, indent + 1, ss);
         } else if (auto x = std::dynamic_pointer_cast<FilterPlan>(plan)) {
-            ss << prefix << " Filter(condition=[";
+            ss << prefix << "Filter(condition=[";
             for (size_t i = 0; i < x->conds_.size(); i++) {
                 if (i > 0) ss << ",";
                 auto& cond = x->conds_[i];
@@ -117,9 +117,9 @@ class Portal
             ss << "])\n";
             explain_plan(x->subplan_, indent + 1, ss);
         } else if (auto x = std::dynamic_pointer_cast<ScanPlan>(plan)) {
-            ss << prefix << "  Scan(table=" << x->tab_name_ << ")\n";
+            ss << prefix << "Scan(table=" << x->tab_name_ << ")\n";
         } else if (auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
-            ss << prefix << " Sort(column=";
+            ss << prefix << "Sort(column=";
             if (!x->sel_col_.tab_name.empty())
                 ss << x->sel_col_.tab_name << ".";
             ss << x->sel_col_.col_name;

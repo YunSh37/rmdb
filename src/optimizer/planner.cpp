@@ -211,8 +211,11 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
     auto& all_conds = query->conds;
     auto& sel_cols = query->cols;
 
-    // 判断是否为 SELECT *
-    bool is_select_star = sel_cols.empty();
+    // 判断是否为 SELECT *（用 AST 判断，不能用 sel_cols，因为分析器已把 * 展开为全部列名）
+    bool is_select_star = false;
+    if (auto select_stmt = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse)) {
+        is_select_star = select_stmt->cols.empty();
+    }
 
     // ================================================================
     // 第1步：为每个表创建 Scan + Filter + Project 子树
