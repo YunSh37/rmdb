@@ -57,7 +57,7 @@ class Portal
      *  @param aliases 别名映射：alias → real_table_name（反向查找用别名显示） */
     void explain_plan(std::shared_ptr<Plan> plan, int indent, std::stringstream &ss,
                        const std::map<std::string, std::string>& aliases = {}) {
-        std::string prefix(indent, ' ');
+        std::string prefix(indent * 4, ' ');  // 4空格缩进
 
         // 构建反向映射：real_name → alias（用于 EXPLAIN 显示别名）
         std::map<std::string, std::string> rev_alias;
@@ -96,18 +96,13 @@ class Portal
             explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
             ss << prefix << "Join(tables=[";
-            // 收集所有涉及的表名并按字母序排列
+            // 收集所有涉及的表名（真实表名）并按字母序排列
             std::vector<std::string> all_tabs;
             collect_tables(x, all_tabs);
-            // 转换为显示名称再排序
-            std::vector<std::string> display_tabs;
-            for (auto& t : all_tabs) {
-                display_tabs.push_back(display_name(t));
-            }
-            std::sort(display_tabs.begin(), display_tabs.end());
-            for (size_t i = 0; i < display_tabs.size(); i++) {
+            std::sort(all_tabs.begin(), all_tabs.end());
+            for (size_t i = 0; i < all_tabs.size(); i++) {
                 if (i > 0) ss << ",";
-                ss << display_tabs[i];
+                ss << all_tabs[i];
             }
             ss << "],condition=[";
             for (size_t i = 0; i < x->conds_.size(); i++) {
@@ -142,7 +137,7 @@ class Portal
             ss << "])\n";
             explain_plan(x->subplan_, indent + 1, ss, aliases);
         } else if (auto x = std::dynamic_pointer_cast<ScanPlan>(plan)) {
-            ss << prefix << "Scan(table=" << display_name(x->tab_name_) << ")\n";
+            ss << prefix << "Scan(table=" << x->tab_name_ << ")\n";  // 始终用真实表名
         } else if (auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             ss << prefix << "Sort(column=";
             ss << display_name(x->sel_col_.tab_name) << ".";
