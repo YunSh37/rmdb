@@ -38,7 +38,34 @@ class UpdateExecutor : public AbstractExecutor {
         context_ = context;
     }
     std::unique_ptr<RmRecord> Next() override {
-        
+        // 遍历所有需要更新的记录
+        for (auto& rid : rids_) {
+            // 1. 读取当前记录
+            auto rec = fh_->get_record(rid, context_);
+            // 2. 对每个 set_clause 修改对应列
+            for (auto& clause : set_clauses_) {
+                // 找到要更新的列
+                auto col_it = std::find_if(tab_.cols.begin(), tab_.cols.end(),
+                    [&](const ColMeta& col) { return col.name == clause.lhs.col_name; });
+                if (col_it == tab_.cols.end()) {
+                    throw ColumnNotFoundError(clause.lhs.col_name);
+                }
+                // 类型检查
+                if (col_it->type != clause.rhs.type) {
+                    throw IncompatibleTypeError(coltype2str(col_it->type), coltype2str(clause.rhs.type));
+                }
+                // 确保 rhs 的 raw 数据已初始化
+                if (clause.rhs.raw == nullptr) {
+                    Value val = clause.rhs;
+                    val.init_raw(col_it->len);
+                    memcpy(rec->data + col_it->offset, val.raw->data, col_it->len);
+                } else {
+                    memcpy(rec->data + col_it->offset, clause.rhs.raw->data, col_it->len);
+                }
+            }
+            // 3. 写回修改后的记录
+            fh_->update_record(rid, rec->data, context_);
+        }
         return nullptr;
     }
 

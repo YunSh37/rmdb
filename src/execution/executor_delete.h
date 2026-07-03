@@ -37,6 +37,10 @@ class DeleteExecutor : public AbstractExecutor {
     }
 
     std::unique_ptr<RmRecord> Next() override {
+        // 遍历删除所有匹配的记录
+        for (auto& rid : rids_) {
+            fh_->delete_record(rid, context_);
+        }
         return nullptr;
     }
 

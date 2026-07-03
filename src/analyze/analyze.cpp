@@ -22,7 +22,10 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
     {
         // 处理表名
         query->tables = std::move(x->tabs);
-        /** TODO: 检查表是否存在 */
+        // 检查表是否存在
+        for (auto& tab_name : query->tables) {
+            sm_manager_->db_.get_table(tab_name);
+        }
 
         // 处理target list，再target list中添加上表名，例如 a.id
         for (auto &sv_sel_col : x->cols) {
@@ -48,8 +51,18 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         get_clause(x->conds, query->conds);
         check_clause(query->tables, query->conds);
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
-        /** TODO: */
-
+        // 检查表是否存在
+        sm_manager_->db_.get_table(x->tab_name);
+        // 转换 set_clauses
+        for (auto& sv_clause : x->set_clauses) {
+            SetClause clause;
+            clause.lhs = {.tab_name = x->tab_name, .col_name = sv_clause->col_name};
+            clause.rhs = convert_sv_value(sv_clause->val);
+            query->set_clauses.push_back(clause);
+        }
+        // 处理 WHERE 条件
+        get_clause(x->conds, query->conds);
+        check_clause({x->tab_name}, query->conds);
     } else if (auto x = std::dynamic_pointer_cast<ast::DeleteStmt>(parse)) {
         //处理where条件
         get_clause(x->conds, query->conds);
@@ -84,8 +97,13 @@ TabCol Analyze::check_column(const std::vector<ColMeta> &all_cols, TabCol target
         }
         target.tab_name = tab_name;
     } else {
-        /** TODO: Make sure target column exists */
-        
+        // 显式指定了表名，校验该列确实存在于该表中
+        const auto &tab_cols = sm_manager_->db_.get_table(target.tab_name).cols;
+        auto pos = std::find_if(tab_cols.begin(), tab_cols.end(),
+            [&](const ColMeta& col) { return col.name == target.col_name; });
+        if (pos == tab_cols.end()) {
+            throw ColumnNotFoundError(target.tab_name + "." + target.col_name);
+        }
     }
     return target;
 }

@@ -85,7 +85,21 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    
+    // 1. 进入数据库目录
+    if (chdir(db_name.c_str()) < 0) {
+        throw UnixError();
+    }
+    // 2. 读取元数据文件，若不存在则初始化为空数据库
+    std::ifstream ifs(DB_META_NAME);
+    if (ifs.is_open()) {
+        ifs >> db_;
+        ifs.close();
+    }
+    db_.name_ = db_name;
+    // 3. 为每张表打开记录文件
+    for (auto& entry : db_.tabs_) {
+        fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
+    }
 }
 
 /**
@@ -101,7 +115,18 @@ void SmManager::flush_meta() {
  * @description: 关闭数据库并把数据落盘
  */
 void SmManager::close_db() {
-    
+    // 1. 保存元数据到磁盘
+    flush_meta();
+    // 2. 关闭所有打开的表数据文件
+    for (auto& entry : fhs_) {
+        rm_manager_->close_file(entry.second.get());
+    }
+    fhs_.clear();
+    // 3. 关闭所有打开的索引文件
+    for (auto& entry : ihs_) {
+        ix_manager_->close_index(entry.second.get());
+    }
+    ihs_.clear();
 }
 
 /**
@@ -188,7 +213,29 @@ void SmManager::create_table(const std::string& tab_name, const std::vector<ColD
  * @param {Context*} context
  */
 void SmManager::drop_table(const std::string& tab_name, Context* context) {
-    
+    // 1. 检查表是否存在
+    if (!db_.is_table(tab_name)) {
+        throw TableNotFoundError(tab_name);
+    }
+    TabMeta& tab = db_.get_table(tab_name);
+    // 2. 关闭并销毁表的数据文件
+    if (fhs_.count(tab_name)) {
+        rm_manager_->close_file(fhs_[tab_name].get());
+        fhs_.erase(tab_name);
+    }
+    rm_manager_->destroy_file(tab_name);
+    // 3. 销毁该表上的所有索引文件
+    for (auto& index : tab.indexes) {
+        std::string index_name = ix_manager_->get_index_name(tab_name, index.cols);
+        if (ihs_.count(index_name)) {
+            ix_manager_->close_index(ihs_[index_name].get());
+            ihs_.erase(index_name);
+        }
+        ix_manager_->destroy_index(tab_name, index.cols);
+    }
+    // 4. 从元数据中移除并持久化
+    db_.tabs_.erase(tab_name);
+    flush_meta();
 }
 
 /**
