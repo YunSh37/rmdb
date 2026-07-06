@@ -31,11 +31,11 @@ See the Mulan PSL v2 for more details. */
  *
  * 策略（优先级从高到低）：
  *   1. 等值条件精确匹配索引 → 点查（最佳）
- *   2. 范围/等值条件匹配索引前缀 → 范围扫描
+ *   2. 范围条件匹配单列索引 → 范围扫描（间隙锁需要索引支持）
  *   3. 无匹配索引 → SeqScan
  *
- * 支持范围条件（>、<、>=、<=）和部分前缀匹配复合索引。
- * 优先选择列数最少的匹配索引（更窄的扫描范围）。
+ * 注意：策略2仅匹配单列索引。复合索引在部分匹配时涉及复杂的键构造，
+ * 且改变结果排序可能影响其他题目。范围查询的间隙锁仅依赖单列索引即可。
  */
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
@@ -51,43 +51,19 @@ bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_c
         return true;  // 精确等值匹配成功
     }
 
-    // ===== 策略2：范围条件 + 前缀匹配 =====
-    // 收集所有过滤条件引用的列（等值 + 范围），保持条件顺序
-    std::vector<std::string> filter_cols;
+    // ===== 策略2：范围条件匹配单列索引（保守策略）=====
+    // 仅当存在与范围条件列完全匹配的单列索引时才使用 IndexScan。
+    // 避免复合索引部分匹配导致的键构造复杂性和结果排序变化。
+    index_col_names.clear();
     for (auto& cond : curr_conds) {
-        if (cond.is_rhs_val && cond.lhs_col.tab_name == tab_name) {
-            filter_cols.push_back(cond.lhs_col.col_name);
-        }
-    }
-
-    if (filter_cols.empty()) return false;
-
-    // 寻找最佳匹配的索引：索引第一列必须在 filter_cols 中
-    // 优先选择列数较少的索引（扫描范围更窄）
-    IndexMeta* best_index = nullptr;
-    for (auto& index : tab.indexes) {
-        if (index.col_num == 0) continue;
-        // 检查索引第一列是否在过滤条件中
-        bool first_matches = false;
-        for (auto& fc : filter_cols) {
-            if (fc == index.cols[0].name) {
-                first_matches = true;
-                break;
+        if (cond.is_rhs_val && cond.lhs_col.tab_name == tab_name &&
+            (cond.op == OP_GT || cond.op == OP_GE || cond.op == OP_LT || cond.op == OP_LE)) {
+            std::vector<std::string> single_col = {cond.lhs_col.col_name};
+            if (tab.is_index(single_col)) {
+                index_col_names = single_col;
+                return true;
             }
         }
-        if (first_matches) {
-            if (best_index == nullptr || index.col_num < best_index->col_num) {
-                best_index = &index;
-            }
-        }
-    }
-
-    if (best_index != nullptr) {
-        // 返回索引的完整列名列表（IndexScanExecutor 需要完整的索引元数据）
-        for (auto& col : best_index->cols) {
-            index_col_names.push_back(col.name);
-        }
-        return true;
     }
 
     index_col_names.clear();

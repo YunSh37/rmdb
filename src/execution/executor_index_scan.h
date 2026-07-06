@@ -221,6 +221,8 @@ class IndexScanExecutor : public AbstractExecutor {
             int col_len = index_meta_.cols[i].len;
 
             // 查找该列的等值条件或范围条件
+            // 注意：inclusive 标志仅由范围条件设置，EQ 条件不覆盖（避免复合索引中
+            // 后续列 EQ 覆盖前导列范围条件的 inclusive 标志）
             bool found_eq = false;    // 是否找到等值条件（OP_EQ）
             bool found_range = false; // 是否找到范围条件（OP_GT/OP_GE/OP_LT/OP_LE）
             for (auto& cond : fed_conds_) {
@@ -230,8 +232,8 @@ class IndexScanExecutor : public AbstractExecutor {
                     found_eq = true;
                     has_lower = true;
                     has_upper = true;
-                    lower_inclusive = true;
-                    upper_inclusive = true;
+                    // 不设置 inclusive 标志——留给范围条件决定
+                    // 点查询场景在下方 exact_match 分支中硬编码为 true
                     break;
                 } else if (cond.lhs_col.col_name == col_name && cond.is_rhs_val &&
                           (cond.op == OP_GT || cond.op == OP_GE)) {
