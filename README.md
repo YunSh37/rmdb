@@ -17,9 +17,9 @@
 ## 技术栈
 
 - **语言**：C++17
-- **构建系统**：CMake ≥ 3.28
+- **构建系统**：CMake ≥ 3.17
 - **词法/语法分析**：Flex 2.6.4 + Bison 3.8.2
-- **测试框架**：Google Test（C++ 单元测试）+ Python 自动化集成测试
+- **测试框架**：Google Test（C++ 单元测试）
 - **运行环境**：WSL（Windows Subsystem for Linux）
 
 ## 项目结构
@@ -44,25 +44,10 @@ rmdb/
 ├── rmdb_client/               # 命令行客户端
 │   ├── src/
 │   └── build/
-├── tools/                     # Python 自动化测试套件
-│   ├── run_all_tests.py       # 测试入口（运行全部题目）
-│   └── tests/
-│       ├── base.py            # 公共基础设施（RMDBTester）
-│       ├── test_topic2.py     # 题目二：查询执行
-│       ├── test_topic3.py     # 题目三：唯一索引
-│       ├── test_topic4.py     # 题目四：选择/投影下推
-│       ├── test_topic5.py     # 题目五：聚合与分组
-│       ├── test_topic6.py     # 题目六：半连接
-│       ├── test_topic7.py     # 题目七：事务控制
-│       ├── test_topic8.py     # 题目八：MVCC
-│       └── test_topic9.py     # 题目九：故障恢复
 ├── deps/                      # 第三方依赖
 │   └── googletest/            # Google Test
 ├── CMakeLists.txt             # 顶层 CMake 构建配置
-├── build/                     # 构建输出（本地生成，已 gitignore）
-├── RMDB项目结构.pdf            # 架构详解
-├── RMDB使用文档.pdf            # 编译运行指南
-└── 框架图.pdf                  # 系统框架图
+└── build/                     # 构建输出（本地生成，已 gitignore）
 ```
 
 ## 环境配置
@@ -87,19 +72,15 @@ sudo apt install -y build-essential cmake g++
 
 # 词法/语法分析工具
 sudo apt install -y flex bison
-
-# Python（用于自动化测试）
-sudo apt install -y python3
 ```
 
 验证安装：
 
 ```bash
-cmake --version     # ≥ 3.28.3
+cmake --version     # ≥ 3.17
 flex --version      # 2.6.4
 bison --version     # 3.8.2
 g++ --version       # 支持 C++17
-python3 --version   # ≥ 3.8
 ```
 
 ### 3. 克隆仓库
@@ -136,44 +117,39 @@ cd rmdb_client/build && ./rmdb_client
 
 客户端支持标准 SQL 语句交互输入。
 
-## 自动化测试
+## 单元测试
 
-Python 测试套件位于 `tools/` 目录，通过 socket 与服务端通信，覆盖题目二~九的全部测试点。
+项目使用 **Google Test** 框架提供 C++ 单元测试，覆盖存储引擎、索引、记录管理等基础设施模块。
 
-### 运行全部测试
-
-```bash
-cd /mnt/d/Python_Project/RMDB_proj/rmdb
-python3 tools/run_all_tests.py
-```
-
-### 单独运行某个题目
+### 编译并运行
 
 ```bash
-# 在项目根目录执行
-python3 tools/tests/test_topic2.py    # 题目二：查询执行
-python3 tools/tests/test_topic3.py    # 题目三：唯一索引（含性能测试，约3-4分钟）
-python3 tools/tests/test_topic4.py    # 题目四：选择/投影下推
-python3 tools/tests/test_topic5.py    # 题目五：聚合与分组
-python3 tools/tests/test_topic6.py    # 题目六：半连接
-python3 tools/tests/test_topic7.py    # 题目七：事务控制
-python3 tools/tests/test_topic8.py    # 题目八：MVCC
-python3 tools/tests/test_topic9.py    # 题目九：故障恢复（含TPC-C，约2-3分钟）
+cd build && make unit_test -j4 && ./bin/unit_test && cd ..
 ```
 
-每个脚本会自动启动服务端 → 执行测试 → 输出通过/失败 → 停止服务端。
+`make unit_test` 编译单元测试二进制文件，`./bin/unit_test` 直接运行并输出每项测试的通过/失败结果。
 
-### 测试耗时参考
+### 主要测试覆盖
 
-| 题目 | 耗时 | 说明 |
-|------|------|------|
-| 题目二 | < 10 秒 | 基本 DDL/DML |
-| 题目三 | 3-4 分钟 | 含 3000×3000 索引性能对比 |
-| 题目四 | < 30 秒 | 含 EXPLAIN 验证 |
-| 题目五 | < 10 秒 | 聚合/分组/排序 |
-| 题目六 | < 10 秒 | Semi Join |
-| 题目七 | < 10 秒 | 事务提交/回滚 |
-| 题目八 | < 10 秒 | MVCC 可见性/版本链 |
-| 题目九 | 2-3 分钟 | TPC-C 建表 + crash/recovery 计时 |
-| **全部** | **约 8-10 分钟** | |
+| 测试文件 | 测试内容 |
+|----------|----------|
+| `storage_test.cpp` | 磁盘管理器（DiskManager）、缓冲池（BufferPoolManager）读写 |
+| `index_test.cpp` | B+Tree 索引的插入、查找、删除与唯一性约束 |
+| `record_test.cpp` | 记录文件（RmFileHandle）的增删改查与 MVCC 可见性 |
+| `recovery_test.cpp` | WAL 日志写入与 ARIES 恢复流程 |
+| `lock_manager_test.cpp` | 锁管理器加锁/解锁/兼容矩阵验证 |
+
+### 测试结果示例
+
+```
+[==========] Running 25 tests from 5 test suites.
+[----------] 5 tests from StorageTest
+[       OK ] StorageTest.DiskReadWrite (0 ms)
+...
+[----------] 5 tests from IndexTest
+[       OK ] IndexTest.InsertAndLookup (0 ms)
+...
+[==========] 25 tests from 5 test suites ran. (120 ms total)
+[  PASSED  ] 25 tests.
+```
 

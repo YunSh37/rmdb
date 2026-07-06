@@ -44,6 +44,23 @@ venv/
 data.json
 reports/
 
+# === 自编写测试文件（本地调试，不推送） ===
+test_topic10.py
+test_all_topics.py
+test_phantom_comprehensive.py
+test_join_phantom.py
+test_aggregation.py
+test_all.py
+test_bigint.py
+test_datetime.py
+
+# === 测试工具目录（本地调试，不推送） ===
+tools/
+
+# === 测试数据库目录（本地生成） ===
+test_db/
+test_*_db/
+
 # === 项目文档（本地维护，不推送） ===
 测试说明文档v3.0.md
 测试说明文档v3.0 .pdf
