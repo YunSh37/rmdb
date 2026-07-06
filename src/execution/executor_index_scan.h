@@ -220,8 +220,9 @@ class IndexScanExecutor : public AbstractExecutor {
             }
             int col_len = index_meta_.cols[i].len;
 
-            // 查找该列的等值条件
-            bool found_eq = false;
+            // 查找该列的等值条件或范围条件
+            bool found_eq = false;    // 是否找到等值条件（OP_EQ）
+            bool found_range = false; // 是否找到范围条件（OP_GT/OP_GE/OP_LT/OP_LE）
             for (auto& cond : fed_conds_) {
                 if (cond.lhs_col.col_name == col_name && cond.is_rhs_val && cond.op == OP_EQ) {
                     memcpy(lower_key + col_offset, cond.rhs_val.raw->data, col_len);
@@ -237,19 +238,23 @@ class IndexScanExecutor : public AbstractExecutor {
                     memcpy(lower_key + col_offset, cond.rhs_val.raw->data, col_len);
                     has_lower = true;
                     lower_inclusive = (cond.op == OP_GE);  // >=为true, >为false
+                    found_range = true;
                     exact_match = false;
                 } else if (cond.lhs_col.col_name == col_name && cond.is_rhs_val &&
                           (cond.op == OP_LT || cond.op == OP_LE)) {
                     memcpy(upper_key + col_offset, cond.rhs_val.raw->data, col_len);
                     has_upper = true;
                     upper_inclusive = (cond.op == OP_LE);  // <=为true, <为false
+                    found_range = true;
                     exact_match = false;
                 }
             }
             if (!found_eq && i < index_meta_.cols.size()) {
                 exact_match = false;
             }
-            if (!found_eq) {
+            // 仅当既无等值条件也无范围条件时，才填充默认边界值
+            // （防止覆盖上面已设置的范围条件键值）
+            if (!found_eq && !found_range) {
                 // 后面的列没有精确条件，lower bound用最小值，upper bound用最大值
                 memset(lower_key + col_offset, 0, col_len);
                 memset(upper_key + col_offset, 0xFF, col_len);
