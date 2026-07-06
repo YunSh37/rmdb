@@ -678,6 +678,7 @@ char *yytext;
     /* enable location */
 #include "ast.h"
 #include "yacc.tab.h"
+#include "errors.h"
 #include <iostream>
 #include <cerrno>
 #include <climits>
@@ -695,9 +696,9 @@ char *yytext;
         } \
     }
 
-#line 699 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 700 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
-#line 701 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 702 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
 #define INITIAL 0
 #define STATE_COMMENT 1
@@ -931,11 +932,11 @@ YY_DECL
 		}
 
 	{
-#line 48 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 49 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 
-#line 50 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 51 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
     /* block comment */
-#line 939 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 940 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -994,277 +995,277 @@ do_action:	/* This label is used only to access EOF actions. */
 
 case 1:
 YY_RULE_SETUP
-#line 51 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 52 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { BEGIN(STATE_COMMENT); }
 	YY_BREAK
 case 2:
 YY_RULE_SETUP
-#line 52 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 53 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { BEGIN(INITIAL); }
 	YY_BREAK
 case 3:
 /* rule 3 can match eol */
 YY_RULE_SETUP
-#line 53 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 54 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore the text of the comment */ }
 	YY_BREAK
 case 4:
 YY_RULE_SETUP
-#line 54 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 55 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore *'s that aren't part of */ }
 	YY_BREAK
 /* single line comment */
 case 5:
 YY_RULE_SETUP
-#line 56 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 57 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore single line comment */ }
 	YY_BREAK
 /* white space and new line */
 case 6:
 YY_RULE_SETUP
-#line 58 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 59 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore white space */ }
 	YY_BREAK
 case 7:
 /* rule 7 can match eol */
 YY_RULE_SETUP
-#line 59 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 60 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore new line */ }
 	YY_BREAK
 /* keywords */
 case 8:
 YY_RULE_SETUP
-#line 61 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 62 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SHOW; }
 	YY_BREAK
 case 9:
 YY_RULE_SETUP
-#line 62 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 63 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_BEGIN; }
 	YY_BREAK
 case 10:
 YY_RULE_SETUP
-#line 63 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 64 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_COMMIT; }
 	YY_BREAK
 case 11:
 YY_RULE_SETUP
-#line 64 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 65 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_ABORT; }
 	YY_BREAK
 case 12:
 YY_RULE_SETUP
-#line 65 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 66 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_ROLLBACK; }
 	YY_BREAK
 case 13:
 YY_RULE_SETUP
-#line 66 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 67 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TABLES; }
 	YY_BREAK
 case 14:
 YY_RULE_SETUP
-#line 67 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 68 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return CREATE; }
 	YY_BREAK
 case 15:
 YY_RULE_SETUP
-#line 68 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 69 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TABLE; }
 	YY_BREAK
 case 16:
 YY_RULE_SETUP
-#line 69 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 70 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DROP; }
 	YY_BREAK
 case 17:
 YY_RULE_SETUP
-#line 70 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 71 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DESC; }
 	YY_BREAK
 case 18:
 YY_RULE_SETUP
-#line 71 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 72 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INSERT; }
 	YY_BREAK
 case 19:
 YY_RULE_SETUP
-#line 72 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 73 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INTO; }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
-#line 73 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 74 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return VALUES; }
 	YY_BREAK
 case 21:
 YY_RULE_SETUP
-#line 74 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 75 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DELETE; }
 	YY_BREAK
 case 22:
 YY_RULE_SETUP
-#line 75 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 76 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return FROM; }
 	YY_BREAK
 case 23:
 YY_RULE_SETUP
-#line 76 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 77 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return WHERE; }
 	YY_BREAK
 case 24:
 YY_RULE_SETUP
-#line 77 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 78 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return UPDATE; }
 	YY_BREAK
 case 25:
 YY_RULE_SETUP
-#line 78 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 79 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SET; }
 	YY_BREAK
 case 26:
 YY_RULE_SETUP
-#line 79 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 80 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SELECT; }
 	YY_BREAK
 case 27:
 YY_RULE_SETUP
-#line 80 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 81 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INT; }
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
-#line 81 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 82 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return BIGINT; }
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
-#line 82 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 83 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return CHAR; }
 	YY_BREAK
 case 30:
 YY_RULE_SETUP
-#line 83 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 84 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return FLOAT; }
 	YY_BREAK
 case 31:
 YY_RULE_SETUP
-#line 84 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 85 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INDEX; }
 	YY_BREAK
 case 32:
 YY_RULE_SETUP
-#line 85 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 86 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return AND; }
 	YY_BREAK
 case 33:
 YY_RULE_SETUP
-#line 86 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 87 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {return JOIN;}
 	YY_BREAK
 case 34:
 YY_RULE_SETUP
-#line 87 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 88 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SEMI; }
 	YY_BREAK
 case 35:
 YY_RULE_SETUP
-#line 88 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 89 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return EXIT; }
 	YY_BREAK
 case 36:
 YY_RULE_SETUP
-#line 89 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 90 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return EXPLAIN; }
 	YY_BREAK
 case 37:
 YY_RULE_SETUP
-#line 90 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 91 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return HELP; }
 	YY_BREAK
 case 38:
 YY_RULE_SETUP
-#line 91 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 92 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return ORDER; }
 	YY_BREAK
 case 39:
 YY_RULE_SETUP
-#line 92 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 93 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {  return BY;  }
 	YY_BREAK
 case 40:
 YY_RULE_SETUP
-#line 93 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 94 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return ON; }
 	YY_BREAK
 case 41:
 YY_RULE_SETUP
-#line 94 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 95 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return ASC; }
 	YY_BREAK
 case 42:
 YY_RULE_SETUP
-#line 95 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 96 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return ENABLE_NESTLOOP; }
 	YY_BREAK
 case 43:
 YY_RULE_SETUP
-#line 96 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 97 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return ENABLE_SORTMERGE; }
 	YY_BREAK
 case 44:
 YY_RULE_SETUP
-#line 97 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 98 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return STATIC_CHECKPOINT; }
 	YY_BREAK
 case 45:
 YY_RULE_SETUP
-#line 98 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 99 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return MAX; }
 	YY_BREAK
 case 46:
 YY_RULE_SETUP
-#line 99 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 100 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return MIN; }
 	YY_BREAK
 case 47:
 YY_RULE_SETUP
-#line 100 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 101 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return COUNT; }
 	YY_BREAK
 case 48:
 YY_RULE_SETUP
-#line 101 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 102 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SUM; }
 	YY_BREAK
 case 49:
 YY_RULE_SETUP
-#line 102 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 103 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return AS; }
 	YY_BREAK
 case 50:
 YY_RULE_SETUP
-#line 103 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 104 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return GROUP; }
 	YY_BREAK
 case 51:
 YY_RULE_SETUP
-#line 104 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 105 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return HAVING; }
 	YY_BREAK
 case 52:
 YY_RULE_SETUP
-#line 105 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 106 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return LIMIT; }
 	YY_BREAK
 case 53:
 YY_RULE_SETUP
-#line 106 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 107 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DATETIME; }
 	YY_BREAK
 case 54:
 YY_RULE_SETUP
-#line 107 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 108 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_bool = true;
     return VALUE_BOOL;
@@ -1272,7 +1273,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 55:
 YY_RULE_SETUP
-#line 111 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 112 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_bool = false;
     return VALUE_BOOL;
@@ -1281,28 +1282,28 @@ YY_RULE_SETUP
 /* operators */
 case 56:
 YY_RULE_SETUP
-#line 116 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 117 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return GEQ; }
 	YY_BREAK
 case 57:
 YY_RULE_SETUP
-#line 117 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 118 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return LEQ; }
 	YY_BREAK
 case 58:
 YY_RULE_SETUP
-#line 118 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 119 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return NEQ; }
 	YY_BREAK
 case 59:
 YY_RULE_SETUP
-#line 119 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 120 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return yytext[0]; }
 	YY_BREAK
 /* id */
 case 60:
 YY_RULE_SETUP
-#line 121 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 122 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_str = yytext;
     return IDENTIFIER;
@@ -1311,16 +1312,18 @@ YY_RULE_SETUP
 /* literals */
 case 61:
 YY_RULE_SETUP
-#line 126 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 127 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     errno = 0;
     long long val = strtoll(yytext, nullptr, 10);
-    if (errno == ERANGE || val > INT64_MAX || val < INT64_MIN) {
-        // 溢出：设为 int64_t 最大值/最小值标记，后续按 bigint 处理
+    if (errno == ERANGE) {
+        // 溢出：标记 overflow，由语义分析阶段抛出异常（避免从 lexer 抛出导致 parser 崩溃）
         yylval->sv_bigint = (yytext[0] == '-') ? INT64_MIN : INT64_MAX;
+        yylval->sv_overflow = true;
         yylval->sv_int = 0;
         return VALUE_BIGINT;
     }
+    yylval->sv_overflow = false;
     if (val > INT32_MAX || val < INT32_MIN) {
         yylval->sv_bigint = (int64_t)val;
         return VALUE_BIGINT;
@@ -1331,7 +1334,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 62:
 YY_RULE_SETUP
-#line 142 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 145 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_float = atof(yytext);
     return VALUE_FLOAT;
@@ -1340,7 +1343,7 @@ YY_RULE_SETUP
 case 63:
 /* rule 63 can match eol */
 YY_RULE_SETUP
-#line 146 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 149 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_str = std::string(yytext + 1, strlen(yytext) - 2);
     return VALUE_STRING;
@@ -1349,21 +1352,21 @@ YY_RULE_SETUP
 /* EOF */
 case YY_STATE_EOF(INITIAL):
 case YY_STATE_EOF(STATE_COMMENT):
-#line 151 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 154 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return T_EOF; }
 	YY_BREAK
 /* unexpected char */
 case 64:
 YY_RULE_SETUP
-#line 153 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 156 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { std::cerr << "Lexer Error: unexpected character " << yytext[0] << std::endl; }
 	YY_BREAK
 case 65:
 YY_RULE_SETUP
-#line 154 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 157 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 ECHO;
 	YY_BREAK
-#line 1367 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 1370 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
 	case YY_END_OF_BUFFER:
 		{
@@ -2329,5 +2332,5 @@ void yyfree (void * ptr )
 
 #define YYTABLES_NAME "yytables"
 
-#line 154 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 157 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 

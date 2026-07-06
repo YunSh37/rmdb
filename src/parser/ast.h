@@ -145,8 +145,9 @@ struct IntLit : public Value {
 
 struct BigIntLit : public Value {
     int64_t val;
+    bool overflow;  // true 表示词法分析时检测到溢出（超出 INT64 范围）
 
-    BigIntLit(int64_t val_) : val(val_) {}
+    BigIntLit(int64_t val_, bool overflow_ = false) : val(val_), overflow(overflow_) {}
 };
 
 struct DatetimeLit : public Value {
@@ -338,6 +339,7 @@ struct SemValue {
     float sv_float;
     std::string sv_str;
     bool sv_bool;
+    bool sv_overflow;      // BIGINT 溢出标志
     OrderByDir sv_orderby_dir;
     std::vector<OrderByDir> sv_orderby_dirs;
     std::vector<std::string> sv_strs;

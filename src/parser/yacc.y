@@ -279,7 +279,7 @@ value:
     }
     |   VALUE_BIGINT
     {
-        $$ = std::make_shared<BigIntLit>($1);
+        $$ = std::make_shared<BigIntLit>($1, $<sv_overflow>1);
     }
     |   VALUE_FLOAT
     {

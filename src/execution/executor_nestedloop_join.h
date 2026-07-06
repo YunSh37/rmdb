@@ -15,27 +15,41 @@ See the Mulan PSL v2 for more details. */
 #include "index/ix.h"
 #include "system/sm.h"
 
-/** 嵌套循环连接执行器（Nested Loop Join Executor）
- *  使用简单的嵌套循环实现：对左表每一行扫描右表的每一行
- *  输出包含左表和右表的所有列
+/** 块嵌套循环连接执行器（Block Nested-Loop Join Executor）
+ *  采用块式读取+惰性求值，避免一次性物化所有结果，支持超内存的大表连接。
+ *
+ *  算法流程：
+ *    1. 物化内表（右表）全部元组到内存（通常较小）
+ *    2. 外表（左表/驱动表）按块读取（每次 BLOCK_SIZE 条元组）
+ *    3. 对外表块中每条元组，扫描内表物化结果，满足连接条件则输出
+ *    4. 逐条惰性生成结果（不一次性物化），避免内存溢出
+ *
+ *  输出包含左表和右表的所有列。
  */
 class NestedLoopJoinExecutor : public AbstractExecutor {
    private:
-    std::unique_ptr<AbstractExecutor> left_;    // 左儿子节点（驱动表）
-    std::unique_ptr<AbstractExecutor> right_;   // 右儿子节点（被探查表）
+    std::unique_ptr<AbstractExecutor> left_;    // 左儿子节点（驱动表/外表）
+    std::unique_ptr<AbstractExecutor> right_;   // 右儿子节点（被探查表/内表）
     size_t len_;                                // join后获得的每条记录的长度
     std::vector<ColMeta> cols_;                 // join后获得的记录的字段
 
     std::vector<Condition> fed_conds_;          // join条件
-    bool isend;
+    bool finished_;                              // 是否已无更多结果
 
     // 保存左表和右表的原始列元数据（offset 未被修改），用于条件评估
     std::vector<ColMeta> left_cols_orig_;
     std::vector<ColMeta> right_cols_orig_;
 
-    // 物化结果
-    std::vector<std::unique_ptr<RmRecord>> results_;
-    size_t cursor_;
+    // ===== 块嵌套循环状态 =====
+    static constexpr size_t BLOCK_SIZE = 5000;  // 每次读取外表元组数
+
+    std::vector<std::unique_ptr<RmRecord>> inner_all_;   // 物化的内表全部元组
+    std::vector<std::unique_ptr<RmRecord>> outer_block_;  // 当前外表块
+    size_t outer_idx_;   // 当前外表块中正在处理的元组索引
+    size_t inner_idx_;   // 当前内表扫描位置
+
+    // 预计算的下一个结果（惰性求值：advanceToNext 在 beginTuple/nextTuple 中计算）
+    std::unique_ptr<RmRecord> current_result_;
 
     /** 比较两个值 */
     template<typename T>
@@ -114,6 +128,71 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         return true;  // 所有条件都满足
     }
 
+    /** 加载下一块外表元组（最多 BLOCK_SIZE 条） */
+    bool loadNextOuterBlock() {
+        outer_block_.clear();
+        for (size_t i = 0; i < BLOCK_SIZE && !left_->is_end(); i++) {
+            auto rec = left_->Next();
+            if (rec) {
+                auto copy = std::make_unique<RmRecord>(left_->tupleLen());
+                memcpy(copy->data, rec->data, left_->tupleLen());
+                outer_block_.push_back(std::move(copy));
+            }
+            left_->nextTuple();
+        }
+        return !outer_block_.empty();
+    }
+
+    /** 物化内表全部元组 */
+    void materializeInner() {
+        inner_all_.clear();
+        right_->beginTuple();
+        while (!right_->is_end()) {
+            auto rec = right_->Next();
+            if (rec) {
+                auto copy = std::make_unique<RmRecord>(right_->tupleLen());
+                memcpy(copy->data, rec->data, right_->tupleLen());
+                inner_all_.push_back(std::move(copy));
+            }
+            right_->nextTuple();
+        }
+    }
+
+    /** 前进到下一个匹配结果（惰性求值核心）
+     *  如果找到，将结果存入 current_result_；如果无更多结果，设置 finished_ = true */
+    void advanceToNext() {
+        while (true) {
+            // 当前外表块已处理完？加载下一块
+            if (outer_idx_ >= outer_block_.size()) {
+                if (!loadNextOuterBlock()) {
+                    finished_ = true;
+                    current_result_.reset();
+                    return;
+                }
+                outer_idx_ = 0;
+            }
+
+            // 扫描内表，查找与当前外表元组匹配的记录
+            while (inner_idx_ < inner_all_.size()) {
+                auto& left_rec = outer_block_[outer_idx_];
+                auto& right_rec = inner_all_[inner_idx_];
+                inner_idx_++;
+
+                if (eval_join_conds(*left_rec, *right_rec)) {
+                    // 构建组合记录：左表列 + 右表列
+                    current_result_ = std::make_unique<RmRecord>(len_);
+                    memcpy(current_result_->data, left_rec->data, left_->tupleLen());
+                    memcpy(current_result_->data + left_->tupleLen(), right_rec->data, right_->tupleLen());
+                    return;  // 找到下一个结果
+                }
+            }
+
+            // 内表扫描完毕，前进外表块中的下一条元组
+            inner_idx_ = 0;
+            outer_idx_++;
+        }
+    }
+
    public:
     NestedLoopJoinExecutor(std::unique_ptr<AbstractExecutor> left, std::unique_ptr<AbstractExecutor> right,
                             std::vector<Condition> conds) {
@@ -133,56 +212,41 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         }
         cols_.insert(cols_.end(), right_cols.begin(), right_cols.end());
 
-        isend = false;
         fed_conds_ = std::move(conds);
-        cursor_ = 0;
+        finished_ = false;
+        outer_idx_ = 0;
+        inner_idx_ = 0;
     }
 
     void beginTuple() override {
-        results_.clear();
+        finished_ = false;
+        outer_idx_ = 0;
+        inner_idx_ = 0;
+        outer_block_.clear();
+        current_result_.reset();
+
+        // 1. 物化内表（右表）全部元组到内存
+        materializeInner();
+
+        // 2. 初始化外表扫描
         left_->beginTuple();
 
-        // 对左表每一行，扫描右表查找匹配
-        for (; !left_->is_end(); left_->nextTuple()) {
-            auto left_rec = left_->Next();
-            if (!left_rec) continue;
-
-            right_->beginTuple();
-
-            // 扫描右表每一行
-            for (; !right_->is_end(); right_->nextTuple()) {
-                auto right_rec = right_->Next();
-                if (!right_rec) continue;
-
-                if (eval_join_conds(*left_rec, *right_rec)) {
-                    // 创建组合记录：左表列 + 右表列
-                    auto result = std::make_unique<RmRecord>(len_);
-                    memcpy(result->data, left_rec->data, left_->tupleLen());
-                    memcpy(result->data + left_->tupleLen(), right_rec->data, right_->tupleLen());
-                    results_.push_back(std::move(result));
-                }
-            }
-        }
-        cursor_ = 0;
-        isend = results_.empty();
+        // 3. 预计算第一个匹配结果
+        advanceToNext();
     }
 
     void nextTuple() override {
-        cursor_++;
-        if (cursor_ >= results_.size()) {
-            isend = true;
-        }
+        advanceToNext();
     }
 
     bool is_end() const override {
-        return cursor_ >= results_.size();
+        return finished_;
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        if (is_end()) return nullptr;
-        auto& rec = results_[cursor_];
+        if (finished_ || !current_result_) return nullptr;
         auto result = std::make_unique<RmRecord>(len_);
-        memcpy(result->data, rec->data, len_);
+        memcpy(result->data, current_result_->data, len_);
         return result;
     }
 

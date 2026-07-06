@@ -2026,7 +2026,7 @@ yyreduce:
   case 42: /* value: VALUE_BIGINT  */
 #line 281 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/yacc.y"
     {
-        (yyval.sv_val) = std::make_shared<BigIntLit>((yyvsp[0].sv_bigint));
+        (yyval.sv_val) = std::make_shared<BigIntLit>((yyvsp[0].sv_bigint), (yyvsp[0].sv_overflow));
     }
 #line 2032 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/yacc.tab.cpp"
     break;

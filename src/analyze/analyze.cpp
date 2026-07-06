@@ -427,6 +427,9 @@ Value Analyze::convert_sv_value(const std::shared_ptr<ast::Value> &sv_val) {
             val.set_int(static_cast<int>(int_lit->val));
         }
     } else if (auto bigint_lit = std::dynamic_pointer_cast<ast::BigIntLit>(sv_val)) {
+        if (bigint_lit->overflow) {
+            throw RMDBError("BIGINT value out of range");
+        }
         val.set_bigint(bigint_lit->val);
     } else if (auto float_lit = std::dynamic_pointer_cast<ast::FloatLit>(sv_val)) {
         val.set_float(float_lit->val);

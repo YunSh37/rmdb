@@ -13,6 +13,7 @@
 %{
 #include "ast.h"
 #include "yacc.tab.h"
+#include "errors.h"
 #include <iostream>
 #include <cerrno>
 #include <climits>
@@ -125,12 +126,14 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 {value_int} {
     errno = 0;
     long long val = strtoll(yytext, nullptr, 10);
-    if (errno == ERANGE || val > INT64_MAX || val < INT64_MIN) {
-        // 溢出：设为 int64_t 最大值/最小值标记，后续按 bigint 处理
+    if (errno == ERANGE) {
+        // 溢出：标记 overflow，由语义分析阶段抛出异常（避免从 lexer 抛出导致 parser 崩溃）
         yylval->sv_bigint = (yytext[0] == '-') ? INT64_MIN : INT64_MAX;
+        yylval->sv_overflow = true;
         yylval->sv_int = 0;
         return VALUE_BIGINT;
     }
+    yylval->sv_overflow = false;
     if (val > INT32_MAX || val < INT32_MIN) {
         yylval->sv_bigint = (int64_t)val;
         return VALUE_BIGINT;

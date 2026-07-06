@@ -58,30 +58,6 @@ inline int days_in_month(int year, int month) {
     return days[month];
 }
 
-/** 将 'YYYY-MM-DD HH:MM:SS' 字符串解析为打包 int64_t
- *  @throws RMDBError 格式错误或数值越界时 */
-inline int64_t datetime_parse(const std::string& str) {
-    int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
-    // 格式: "YYYY-MM-DD HH:MM:SS"
-    if (sscanf(str.c_str(), "%d-%d-%d %d:%d:%d",
-               &year, &month, &day, &hour, &min, &sec) < 3) {
-        throw RMDBError("DATETIME format error, expected 'YYYY-MM-DD HH:MM:SS'");
-    }
-    if (year < 1 || year > 9999)
-        throw RMDBError("DATETIME year out of range (1-9999)");
-    if (month < 1 || month > 12)
-        throw RMDBError("DATETIME month out of range (1-12)");
-    if (day < 1 || day > days_in_month(year, month))
-        throw RMDBError("DATETIME day out of range");
-    if (hour < 0 || hour > 23)
-        throw RMDBError("DATETIME hour out of range (0-23)");
-    if (min < 0 || min > 59)
-        throw RMDBError("DATETIME minute out of range (0-59)");
-    if (sec < 0 || sec > 59)
-        throw RMDBError("DATETIME second out of range (0-59)");
-    return datetime_pack(year, month, day, hour, min, sec);
-}
-
 /** 将打包的 datetime 值格式化为字符串 'YYYY-MM-DD HH:MM:SS' */
 inline std::string datetime_format(int64_t packed) {
     int year, month, day, hour, min, sec;
@@ -95,6 +71,37 @@ inline std::string datetime_format(int64_t packed) {
         << std::setw(2) << min << ':'
         << std::setw(2) << sec;
     return oss.str();
+}
+
+/** 将 'YYYY-MM-DD HH:MM:SS' 字符串解析为打包 int64_t
+ *  @throws RMDBError 格式错误或数值越界时
+ *  格式要求：年-月-日 时:分:秒，月和日必须为2位数，年份范围 1000-9999 */
+inline int64_t datetime_parse(const std::string& str) {
+    int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
+    // 格式: "YYYY-MM-DD HH:MM:SS"，sscanf 的 %d 接受前导零和可变位数
+    if (sscanf(str.c_str(), "%d-%d-%d %d:%d:%d",
+               &year, &month, &day, &hour, &min, &sec) < 3) {
+        throw RMDBError("DATETIME format error, expected 'YYYY-MM-DD HH:MM:SS'");
+    }
+    // 严格格式校验：重新格式化后必须与原字符串一致
+    // 防止 '1999-1-07'（月不足2位）、'1999-001-07'（月多余位）等非法格式通过
+    std::string reformatted = datetime_format(datetime_pack(year, month, day, hour, min, sec));
+    if (reformatted != str) {
+        throw RMDBError("DATETIME format error, expected 'YYYY-MM-DD HH:MM:SS'");
+    }
+    if (year < 1000 || year > 9999)
+        throw RMDBError("DATETIME year out of range (1000-9999)");
+    if (month < 1 || month > 12)
+        throw RMDBError("DATETIME month out of range (1-12)");
+    if (day < 1 || day > days_in_month(year, month))
+        throw RMDBError("DATETIME day out of range");
+    if (hour < 0 || hour > 23)
+        throw RMDBError("DATETIME hour out of range (0-23)");
+    if (min < 0 || min > 59)
+        throw RMDBError("DATETIME minute out of range (0-59)");
+    if (sec < 0 || sec > 59)
+        throw RMDBError("DATETIME second out of range (0-59)");
+    return datetime_pack(year, month, day, hour, min, sec);
 }
 
 
