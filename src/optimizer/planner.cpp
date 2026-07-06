@@ -31,11 +31,14 @@ See the Mulan PSL v2 for more details. */
  *
  * 策略（优先级从高到低）：
  *   1. 等值条件精确匹配索引 → 点查（最佳）
- *   2. 范围条件匹配单列索引 → 范围扫描（间隙锁需要索引支持）
+ *   2. 范围条件匹配索引（含复合索引） → 范围扫描（间隙锁需要索引支持）
  *   3. 无匹配索引 → SeqScan
  *
- * 注意：策略2仅匹配单列索引。复合索引在部分匹配时涉及复杂的键构造，
- * 且改变结果排序可能影响其他题目。范围查询的间隙锁仅依赖单列索引即可。
+ * 策略2的安全约束：
+ *   - 必须至少有一个范围条件（GT/GE/LT/LE）
+ *   - 索引第一列必须在过滤条件中（B+树最左前缀匹配）
+ *   - 所有过滤条件涉及的列必须属于同一个索引（防止引入额外扫描）
+ *   - 优先选择列数较少的索引（更窄的扫描范围）
  */
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
@@ -51,19 +54,61 @@ bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_c
         return true;  // 精确等值匹配成功
     }
 
-    // ===== 策略2：范围条件匹配单列索引（保守策略）=====
-    // 仅当存在与范围条件列完全匹配的单列索引时才使用 IndexScan。
-    // 避免复合索引部分匹配导致的键构造复杂性和结果排序变化。
-    index_col_names.clear();
+    // ===== 策略2：范围条件匹配索引（含复合索引，带安全约束）=====
+    // 收集所有过滤条件涉及的列（去重）和是否有范围条件
+    std::set<std::string> filter_col_set;
+    bool has_range_cond = false;
     for (auto& cond : curr_conds) {
-        if (cond.is_rhs_val && cond.lhs_col.tab_name == tab_name &&
-            (cond.op == OP_GT || cond.op == OP_GE || cond.op == OP_LT || cond.op == OP_LE)) {
-            std::vector<std::string> single_col = {cond.lhs_col.col_name};
-            if (tab.is_index(single_col)) {
-                index_col_names = single_col;
-                return true;
+        if (cond.is_rhs_val && cond.lhs_col.tab_name == tab_name) {
+            filter_col_set.insert(cond.lhs_col.col_name);
+            if (cond.op == OP_GT || cond.op == OP_GE || cond.op == OP_LT || cond.op == OP_LE) {
+                has_range_cond = true;
             }
         }
+    }
+
+    // 无过滤条件或无范围条件 → 回退 SeqScan
+    if (filter_col_set.empty() || !has_range_cond) {
+        index_col_names.clear();
+        return false;
+    }
+
+    // 寻找最佳匹配索引：
+    //   1. 索引第一列必须在 filter_col_set 中（B+树最左前缀）
+    //   2. filter_col_set 的所有列必须属于该索引（避免扫描范围外的列）
+    //   3. 优先选择列数最少的索引
+    IndexMeta* best_index = nullptr;
+    for (auto& index : tab.indexes) {
+        if (index.col_num == 0) continue;
+
+        // 约束1：索引第一列必须在过滤条件中
+        if (filter_col_set.find(index.cols[0].name) == filter_col_set.end()) {
+            continue;
+        }
+
+        // 约束2：所有过滤列必须属于该索引
+        bool all_filters_in_index = true;
+        for (auto& fc : filter_col_set) {
+            bool found = false;
+            for (auto& ic : index.cols) {
+                if (ic.name == fc) { found = true; break; }
+            }
+            if (!found) { all_filters_in_index = false; break; }
+        }
+        if (!all_filters_in_index) continue;
+
+        // 约束3：优先选择列数较少的索引
+        if (best_index == nullptr || index.col_num < best_index->col_num) {
+            best_index = &index;
+        }
+    }
+
+    if (best_index != nullptr) {
+        // 返回索引的完整列名列表（IndexScanExecutor 需要完整的索引元数据）
+        for (auto& col : best_index->cols) {
+            index_col_names.push_back(col.name);
+        }
+        return true;
     }
 
     index_col_names.clear();
