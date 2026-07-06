@@ -78,6 +78,42 @@ static LockManager::GroupLockMode merge_group_mode(LockManager::GroupLockMode cu
     }
 }
 
+/**
+ * @brief 锁升级时合并现有锁模式和新请求的锁模式
+ * 原则：取两者中"更强"的模式，避免丢失锁属性
+ * 例：S + IX → SIX（保留读锁 + 意向写锁）
+ *     S + X  → X  （排他锁支配共享锁）
+ *     IX + S → SIX
+ *     IX + X → X
+ */
+static LockManager::LockMode combine_lock_modes(LockManager::LockMode existing, LockManager::LockMode requested) {
+    // EXCLUSIVE 支配一切
+    if (existing == LockManager::LockMode::EXLUCSIVE || requested == LockManager::LockMode::EXLUCSIVE) {
+        return LockManager::LockMode::EXLUCSIVE;
+    }
+    // S + IX = SIX（保持读锁属性，阻止幻读）
+    if ((existing == LockManager::LockMode::SHARED && requested == LockManager::LockMode::INTENTION_EXCLUSIVE) ||
+        (existing == LockManager::LockMode::INTENTION_EXCLUSIVE && requested == LockManager::LockMode::SHARED)) {
+        return LockManager::LockMode::S_IX;
+    }
+    // SIX + S = SIX（不变）
+    if (existing == LockManager::LockMode::S_IX || requested == LockManager::LockMode::S_IX) {
+        return LockManager::LockMode::S_IX;
+    }
+    // S 比 IS 强
+    if ((existing == LockManager::LockMode::SHARED && requested == LockManager::LockMode::INTENTION_SHARED) ||
+        (existing == LockManager::LockMode::INTENTION_SHARED && requested == LockManager::LockMode::SHARED)) {
+        return LockManager::LockMode::SHARED;
+    }
+    // IX 比 IS 强
+    if ((existing == LockManager::LockMode::INTENTION_SHARED && requested == LockManager::LockMode::INTENTION_EXCLUSIVE) ||
+        (existing == LockManager::LockMode::INTENTION_EXCLUSIVE && requested == LockManager::LockMode::INTENTION_SHARED)) {
+        return LockManager::LockMode::INTENTION_EXCLUSIVE;
+    }
+    // 其他情况：返回请求的模式（通常是同类型或更高级）
+    return requested;
+}
+
 /* ========== 死锁预防：NO-WAIT 策略 ========== */
 // 不再使用等待图和死锁检测：当锁请求不兼容时立即中止请求事务，
 // 避免形成等待链，从而预防死锁。
@@ -127,13 +163,22 @@ static bool lock_common(Transaction* txn, LockDataId& lid, LockManager::LockMode
                     other_gm = merge_group_mode(other_gm, r.lock_mode_);
                 }
             }
-            // 若新模式与其他持有者不兼容 → 升级冲突，中止当前事务
-            if (!is_compatible(mode, other_gm)) {
+
+            // 合并现有锁和新请求锁，保留双方属性（如 S+IX=SIX 防止幻读）
+            LockManager::LockMode combined_mode = combine_lock_modes(req.lock_mode_, mode);
+
+            // 若合并后模式不变（如 SIX+S=SIX），无需升级
+            if (combined_mode == req.lock_mode_) {
+                return true;
+            }
+
+            // 若合并后的模式与其他持有者不兼容 → 升级冲突，中止当前事务
+            if (!is_compatible(combined_mode, other_gm)) {
                 throw TransactionAbortException(txn->get_transaction_id(), AbortReason::UPGRADE_CONFLICT);
             }
 
-            // 执行锁升级：更新锁模式并重新计算 group_lock_mode
-            req.lock_mode_ = mode;
+            // 执行锁升级：更新为组合锁模式并重新计算 group_lock_mode
+            req.lock_mode_ = combined_mode;
             queue.group_lock_mode_ = LockManager::GroupLockMode::NON_LOCK;
             for (auto& r : queue.request_queue_) {
                 if (r.granted_) {
