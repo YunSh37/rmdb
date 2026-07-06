@@ -29,11 +29,52 @@ class AggregationExecutor : public AbstractExecutor {
     size_t len_;                          // 输出记录长度
 
     // 内部结果
-    struct AggRow {
-        std::unique_ptr<RmRecord> row;
-    };
     std::vector<std::unique_ptr<RmRecord>> results_;
     size_t cursor_;
+
+    // ===== 聚合状态辅助结构 =====
+
+    /** 聚合状态：分别跟踪 INT / BIGINT+DATETIME / FLOAT / STRING 四种类型 */
+    struct AggState {
+        // MAX 状态
+        int     int_max;
+        int64_t bigint_max;
+        float   float_max;
+        std::string str_max;
+
+        // MIN 状态
+        int     int_min;
+        int64_t bigint_min;
+        float   float_min;
+        std::string str_min;
+
+        int     count_val;
+        int64_t sum_bigint;
+        float   sum_float;
+
+        // 目标列的实际类型（用于判断使用哪个分支）
+        ColType target_type;
+
+        void init_max() {
+            int_max = INT_MIN;
+            bigint_max = INT64_MIN;
+            float_max = -FLT_MAX;
+            str_max = "";       // 空串表示未初始化
+        }
+        void init_min() {
+            int_min = INT_MAX;
+            bigint_min = INT64_MAX;
+            float_min = FLT_MAX;
+            str_min = "";       // 空串表示未初始化
+        }
+        void init_count() {
+            count_val = 0;
+        }
+        void init_sum() {
+            sum_bigint = 0;
+            sum_float = 0.0f;
+        }
+    };
 
     /** 构建分组键：从记录中提取 GROUP BY 列的值拼接为字符串 */
     std::string build_group_key(const RmRecord& rec, const std::vector<ColMeta>& child_cols) {
@@ -49,27 +90,45 @@ class AggregationExecutor : public AbstractExecutor {
         return key;
     }
 
-    /** 从记录中读取列的值 */
-    template<typename T>
-    T get_col_value(const RmRecord& rec, const TabCol& tc, const std::vector<ColMeta>& child_cols) {
+    /** 从记录中读取列的类型和值 */
+    struct ColValue {
+        ColType type = TYPE_INT;
+        int int_val = 0;
+        int64_t bigint_val = 0;
+        float float_val = 0.0f;
+        std::string str_val;
+    };
+
+    ColValue read_col(const RmRecord& rec, const TabCol& tc, const std::vector<ColMeta>& child_cols) {
+        ColValue cv;
         for (auto& col : child_cols) {
             if (col.tab_name == tc.tab_name && col.name == tc.col_name) {
+                cv.type = col.type;
                 if (col.type == TYPE_INT) {
-                    return static_cast<T>(*(int*)(rec.data + col.offset));
+                    cv.int_val = *(int*)(rec.data + col.offset);
                 } else if (col.type == TYPE_BIGINT || col.type == TYPE_DATETIME) {
-                    return static_cast<T>(*(int64_t*)(rec.data + col.offset));
+                    cv.bigint_val = *(int64_t*)(rec.data + col.offset);
                 } else if (col.type == TYPE_FLOAT) {
-                    return static_cast<T>(*(float*)(rec.data + col.offset));
+                    cv.float_val = *(float*)(rec.data + col.offset);
+                } else if (col.type == TYPE_STRING) {
+                    cv.str_val = std::string(rec.data + col.offset, col.len);
+                    // 去除尾部空白填充
+                    size_t end = cv.str_val.find_last_not_of(" \0");
+                    if (end != std::string::npos) {
+                        cv.str_val = cv.str_val.substr(0, end + 1);
+                    } else {
+                        cv.str_val.clear();
+                    }
                 }
+                break;
             }
         }
-        return T{};
+        return cv;
     }
 
     /** 评估 HAVING 条件（对聚合结果行） */
     bool eval_having(const RmRecord& rec) {
         for (auto& cond : having_conds_) {
-            // 在输出列中查找 LHS 列
             int lhs_idx = -1;
             for (size_t i = 0; i < output_meta_.size(); i++) {
                 if (output_meta_[i].name == cond.lhs_col.col_name) {
@@ -77,7 +136,7 @@ class AggregationExecutor : public AbstractExecutor {
                     break;
                 }
             }
-            if (lhs_idx < 0) continue;  // 列未找到，跳过
+            if (lhs_idx < 0) continue;
 
             auto& meta = output_meta_[lhs_idx];
             bool result = false;
@@ -93,6 +152,12 @@ class AggregationExecutor : public AbstractExecutor {
                 float lhs_val = *(float*)(rec.data + meta.offset);
                 float rhs_val = cond.rhs_val.float_val;
                 result = cmp_float(lhs_val, rhs_val, cond.op);
+            } else if (meta.type == TYPE_STRING) {
+                std::string lhs_val(rec.data + meta.offset, meta.len);
+                size_t end = lhs_val.find_last_not_of(" \0");
+                if (end != std::string::npos) lhs_val = lhs_val.substr(0, end + 1);
+                std::string rhs_val = cond.rhs_val.str_val;
+                result = cmp_str(lhs_val, rhs_val, cond.op);
             }
             if (!result) return false;
         }
@@ -135,6 +200,104 @@ class AggregationExecutor : public AbstractExecutor {
         }
     }
 
+    static bool cmp_str(const std::string& lhs, const std::string& rhs, CompOp op) {
+        switch (op) {
+            case OP_EQ: return lhs == rhs;
+            case OP_NE: return lhs != rhs;
+            case OP_LT: return lhs < rhs;
+            case OP_GT: return lhs > rhs;
+            case OP_LE: return lhs <= rhs;
+            case OP_GE: return lhs >= rhs;
+            default: return false;
+        }
+    }
+
+    /** 更新一行数据的聚合状态 */
+    void update_agg(AggState& st, int agg_type, const ColValue& cv) {
+        switch (agg_type) {
+            case ast::AGG_MAX:
+                if (cv.type == TYPE_BIGINT || cv.type == TYPE_DATETIME) {
+                    if (cv.bigint_val > st.bigint_max) st.bigint_max = cv.bigint_val;
+                } else if (cv.type == TYPE_INT) {
+                    if (cv.int_val > st.int_max) st.int_max = cv.int_val;
+                } else if (cv.type == TYPE_FLOAT) {
+                    if (cv.float_val > st.float_max) st.float_max = cv.float_val;
+                } else if (cv.type == TYPE_STRING) {
+                    if (st.str_max.empty() || cv.str_val > st.str_max) st.str_max = cv.str_val;
+                }
+                break;
+            case ast::AGG_MIN:
+                if (cv.type == TYPE_BIGINT || cv.type == TYPE_DATETIME) {
+                    if (cv.bigint_val < st.bigint_min) st.bigint_min = cv.bigint_val;
+                } else if (cv.type == TYPE_INT) {
+                    if (cv.int_val < st.int_min) st.int_min = cv.int_val;
+                } else if (cv.type == TYPE_FLOAT) {
+                    if (cv.float_val < st.float_min) st.float_min = cv.float_val;
+                } else if (cv.type == TYPE_STRING) {
+                    if (st.str_min.empty() || cv.str_val < st.str_min) st.str_min = cv.str_val;
+                }
+                break;
+            case ast::AGG_COUNT:
+                st.count_val++;
+                break;
+            case ast::AGG_SUM:
+                if (cv.type == TYPE_BIGINT || cv.type == TYPE_INT || cv.type == TYPE_DATETIME) {
+                    st.sum_bigint += (cv.type == TYPE_INT) ? cv.int_val : cv.bigint_val;
+                } else {
+                    st.sum_float += cv.float_val;
+                }
+                break;
+        }
+    }
+
+    /** 从聚合状态写入结果记录 */
+    void write_agg_result(RmRecord& result, const AggState& st, int agg_type,
+                          const ColMeta& meta) {
+        switch (agg_type) {
+            case ast::AGG_MAX:
+                if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
+                    *(int64_t*)(result.data + meta.offset) = st.bigint_max;
+                } else if (meta.type == TYPE_INT) {
+                    *(int*)(result.data + meta.offset) = st.int_max;
+                } else if (meta.type == TYPE_FLOAT) {
+                    *(float*)(result.data + meta.offset) = st.float_max;
+                } else if (meta.type == TYPE_STRING) {
+                    memset(result.data + meta.offset, 0, meta.len);
+                    memcpy(result.data + meta.offset, st.str_max.c_str(),
+                           std::min(st.str_max.size(), (size_t)meta.len));
+                }
+                break;
+            case ast::AGG_MIN:
+                if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
+                    *(int64_t*)(result.data + meta.offset) = st.bigint_min;
+                } else if (meta.type == TYPE_INT) {
+                    *(int*)(result.data + meta.offset) = st.int_min;
+                } else if (meta.type == TYPE_FLOAT) {
+                    *(float*)(result.data + meta.offset) = st.float_min;
+                } else if (meta.type == TYPE_STRING) {
+                    memset(result.data + meta.offset, 0, meta.len);
+                    memcpy(result.data + meta.offset, st.str_min.c_str(),
+                           std::min(st.str_min.size(), (size_t)meta.len));
+                }
+                break;
+            case ast::AGG_COUNT:
+                *(int*)(result.data + meta.offset) = st.count_val;
+                break;
+            case ast::AGG_SUM:
+                if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
+                    *(int64_t*)(result.data + meta.offset) = st.sum_bigint;
+                } else if (meta.type == TYPE_INT) {
+                    *(int*)(result.data + meta.offset) = (int)st.sum_bigint;
+                } else {
+                    *(float*)(result.data + meta.offset) = st.sum_float;
+                }
+                break;
+            case ast::AGG_COUNT_STAR:
+                *(int*)(result.data + meta.offset) = st.count_val;
+                break;
+        }
+    }
+
    public:
     AggregationExecutor(std::unique_ptr<AbstractExecutor> prev,
                         std::vector<int> agg_types,
@@ -159,38 +322,33 @@ class AggregationExecutor : public AbstractExecutor {
         results_.clear();
         auto& child_cols = prev_->cols();
 
+        // ---- 获取每个聚合函数的目标列类型（用于 AggState 初始化）----
+        std::vector<ColType> target_types(agg_types_.size(), TYPE_INT);
+        for (size_t i = 0; i < agg_types_.size(); i++) {
+            if (agg_types_[i] == ast::AGG_NONE || agg_types_[i] == ast::AGG_COUNT_STAR) continue;
+            for (auto& col : child_cols) {
+                if (col.tab_name == agg_targets_[i].tab_name &&
+                    col.name == agg_targets_[i].col_name) {
+                    target_types[i] = col.type;
+                    break;
+                }
+            }
+        }
+
         if (group_by_cols_.empty()) {
-            // ===== 无 GROUP BY：所有行为一组 =====
+            // ==================== 无 GROUP BY ====================
             prev_->beginTuple();
 
-            // 初始化聚合状态（分别跟踪 INT 和 BIGINT 类型）
-            std::vector<int>     agg_int_max;     // MAX for INT
-            std::vector<int64_t> agg_bigint_max;  // MAX for BIGINT/DATETIME
-            std::vector<int>     agg_int_min;     // MIN for INT
-            std::vector<int64_t> agg_bigint_min;  // MIN for BIGINT/DATETIME
-            std::vector<float>   agg_float_max;   // MAX for FLOAT
-            std::vector<float>   agg_float_min;   // MIN for FLOAT
-            std::vector<int>     agg_count;        // COUNT(col)
-            std::vector<int64_t> agg_sum_bigint;   // SUM for INT/BIGINT (use int64_t)
-            std::vector<float>   agg_sum_float;    // SUM for FLOAT
+            std::vector<AggState> states(agg_types_.size());
             int count_star = 0;
 
-            // 初始化聚合状态
             for (size_t i = 0; i < agg_types_.size(); i++) {
+                states[i].target_type = target_types[i];
                 int at = agg_types_[i];
-                if (at == ast::AGG_MAX || at == ast::AGG_MIN) {
-                    agg_int_max.push_back(INT_MIN);
-                    agg_bigint_max.push_back(INT64_MIN);
-                    agg_int_min.push_back(INT_MAX);
-                    agg_bigint_min.push_back(INT64_MAX);
-                    agg_float_max.push_back(-FLT_MAX);
-                    agg_float_min.push_back(FLT_MAX);
-                } else if (at == ast::AGG_COUNT) {
-                    agg_count.push_back(0);
-                } else if (at == ast::AGG_SUM) {
-                    agg_sum_bigint.push_back(0);
-                    agg_sum_float.push_back(0.0f);
-                }
+                if (at == ast::AGG_MAX) states[i].init_max();
+                else if (at == ast::AGG_MIN) states[i].init_min();
+                else if (at == ast::AGG_COUNT || at == ast::AGG_COUNT_STAR) states[i].init_count();
+                else if (at == ast::AGG_SUM) states[i].init_sum();
             }
 
             bool has_data = false;
@@ -200,137 +358,45 @@ class AggregationExecutor : public AbstractExecutor {
                 has_data = true;
                 count_star++;
 
-                // 更新聚合
-                int max_idx = 0, min_idx = 0, count_idx = 0, sum_idx = 0;
                 for (size_t i = 0; i < agg_types_.size(); i++) {
                     int at = agg_types_[i];
-                    if (at == ast::AGG_NONE || at == ast::AGG_COUNT_STAR) continue;
+                    if (at == ast::AGG_NONE) continue;
+                    if (at == ast::AGG_COUNT_STAR) continue;
 
-                    // 获取目标列类型和值
-                    ColType target_type = TYPE_INT;
-                    int int_val = 0;
-                    int64_t bigint_val = 0;
-                    float float_val = 0.0f;
-                    for (auto& col : child_cols) {
-                        if (col.tab_name == agg_targets_[i].tab_name &&
-                            col.name == agg_targets_[i].col_name) {
-                            target_type = col.type;
-                            if (col.type == TYPE_INT) {
-                                int_val = *(int*)(rec->data + col.offset);
-                            } else if (col.type == TYPE_BIGINT || col.type == TYPE_DATETIME) {
-                                bigint_val = *(int64_t*)(rec->data + col.offset);
-                            } else if (col.type == TYPE_FLOAT) {
-                                float_val = *(float*)(rec->data + col.offset);
-                            }
-                            break;
-                        }
-                    }
-
-                    bool is_bigint = (target_type == TYPE_BIGINT || target_type == TYPE_DATETIME);
-
-                    switch (at) {
-                        case ast::AGG_MAX:
-                            if (is_bigint) {
-                                if (bigint_val > agg_bigint_max[max_idx]) agg_bigint_max[max_idx] = bigint_val;
-                            } else if (target_type == TYPE_INT) {
-                                if (int_val > agg_int_max[max_idx]) agg_int_max[max_idx] = int_val;
-                            } else {
-                                if (float_val > agg_float_max[max_idx]) agg_float_max[max_idx] = float_val;
-                            }
-                            max_idx++;
-                            break;
-                        case ast::AGG_MIN:
-                            if (is_bigint) {
-                                if (bigint_val < agg_bigint_min[min_idx]) agg_bigint_min[min_idx] = bigint_val;
-                            } else if (target_type == TYPE_INT) {
-                                if (int_val < agg_int_min[min_idx]) agg_int_min[min_idx] = int_val;
-                            } else {
-                                if (float_val < agg_float_min[min_idx]) agg_float_min[min_idx] = float_val;
-                            }
-                            min_idx++;
-                            break;
-                        case ast::AGG_COUNT:
-                            agg_count[count_idx]++;
-                            count_idx++;
-                            break;
-                        case ast::AGG_SUM:
-                            if (is_bigint || target_type == TYPE_INT) {
-                                agg_sum_bigint[sum_idx] += (target_type == TYPE_INT) ? int_val : bigint_val;
-                            } else {
-                                agg_sum_float[sum_idx] += float_val;
-                            }
-                            sum_idx++;
-                            break;
-                    }
+                    auto cv = read_col(*rec, agg_targets_[i], child_cols);
+                    update_agg(states[i], at, cv);
                 }
             }
 
-            // 构建结果行
             if (has_data || !agg_types_.empty()) {
                 auto result = std::make_unique<RmRecord>(len_);
 
-                int max_idx = 0, min_idx = 0, count_idx = 0, sum_idx = 0;
                 for (size_t i = 0; i < agg_types_.size(); i++) {
                     int at = agg_types_[i];
                     if (at == ast::AGG_NONE) continue;
 
-                    // 找到对应的输出 metadata
-                    int out_idx = 0;
+                    // 找到输出 meta 的索引
+                    int meta_idx = 0;
                     for (size_t j = 0; j <= i && j < agg_types_.size(); j++) {
-                        if (agg_types_[j] != ast::AGG_NONE) out_idx++;
+                        if (agg_types_[j] != ast::AGG_NONE) meta_idx++;
                     }
-                    out_idx--;
+                    meta_idx--;
 
-                    if (out_idx >= 0 && out_idx < (int)output_meta_.size()) {
-                        auto& meta = output_meta_[out_idx];
-                        switch (at) {
-                            case ast::AGG_MAX:
-                                if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
-                                    *(int64_t*)(result->data + meta.offset) = agg_bigint_max[max_idx];
-                                } else if (meta.type == TYPE_INT) {
-                                    *(int*)(result->data + meta.offset) = agg_int_max[max_idx];
-                                } else {
-                                    *(float*)(result->data + meta.offset) = agg_float_max[max_idx];
-                                }
-                                max_idx++;
-                                break;
-                            case ast::AGG_MIN:
-                                if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
-                                    *(int64_t*)(result->data + meta.offset) = agg_bigint_min[min_idx];
-                                } else if (meta.type == TYPE_INT) {
-                                    *(int*)(result->data + meta.offset) = agg_int_min[min_idx];
-                                } else {
-                                    *(float*)(result->data + meta.offset) = agg_float_min[min_idx];
-                                }
-                                min_idx++;
-                                break;
-                            case ast::AGG_COUNT:
-                                *(int*)(result->data + meta.offset) = agg_count[count_idx++];
-                                break;
-                            case ast::AGG_SUM:
-                                if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
-                                    *(int64_t*)(result->data + meta.offset) = agg_sum_bigint[sum_idx];
-                                } else if (meta.type == TYPE_INT) {
-                                    *(int*)(result->data + meta.offset) = (int)agg_sum_bigint[sum_idx];
-                                } else {
-                                    *(float*)(result->data + meta.offset) = agg_sum_float[sum_idx];
-                                }
-                                sum_idx++;
-                                break;
-                            case ast::AGG_COUNT_STAR:
-                                *(int*)(result->data + meta.offset) = count_star;
-                                break;
+                    if (meta_idx >= 0 && meta_idx < (int)output_meta_.size()) {
+                        if (at == ast::AGG_COUNT_STAR) {
+                            *(int*)(result->data + output_meta_[meta_idx].offset) = count_star;
+                        } else {
+                            write_agg_result(*result, states[i], at, output_meta_[meta_idx]);
                         }
                     }
                 }
 
-                // 评估 HAVING
                 if (eval_having(*result)) {
                     results_.push_back(std::move(result));
                 }
             }
         } else {
-            // ===== 有 GROUP BY：按分组键分组 =====
+            // ==================== 有 GROUP BY ====================
             std::map<std::string, std::vector<std::unique_ptr<RmRecord>>> groups;
             prev_->beginTuple();
             for (; !prev_->is_end(); prev_->nextTuple()) {
@@ -342,99 +408,28 @@ class AggregationExecutor : public AbstractExecutor {
                 groups[key].push_back(std::move(copy));
             }
 
-            // 对每个组计算聚合
             for (auto& [key, records] : groups) {
-                // 初始化聚合
-                std::vector<int>     agg_int_max, agg_int_min;
-                std::vector<int64_t> agg_bigint_max, agg_bigint_min;
-                std::vector<float>   agg_float_max, agg_float_min;
-                std::vector<int>     agg_count;
-                std::vector<int64_t> agg_sum_bigint;
-                std::vector<float>   agg_sum_float;
+                std::vector<AggState> states(agg_types_.size());
                 int count_star = (int)records.size();
 
                 for (size_t i = 0; i < agg_types_.size(); i++) {
+                    states[i].target_type = target_types[i];
                     int at = agg_types_[i];
-                    if (at == ast::AGG_MAX || at == ast::AGG_MIN) {
-                        agg_int_max.push_back(INT_MIN);
-                        agg_bigint_max.push_back(INT64_MIN);
-                        agg_int_min.push_back(INT_MAX);
-                        agg_bigint_min.push_back(INT64_MAX);
-                        agg_float_max.push_back(-FLT_MAX);
-                        agg_float_min.push_back(FLT_MAX);
-                    } else if (at == ast::AGG_COUNT) {
-                        agg_count.push_back(0);
-                    } else if (at == ast::AGG_SUM) {
-                        agg_sum_bigint.push_back(0);
-                        agg_sum_float.push_back(0.0f);
-                    }
+                    if (at == ast::AGG_MAX) states[i].init_max();
+                    else if (at == ast::AGG_MIN) states[i].init_min();
+                    else if (at == ast::AGG_COUNT || at == ast::AGG_COUNT_STAR) states[i].init_count();
+                    else if (at == ast::AGG_SUM) states[i].init_sum();
                 }
 
                 for (auto& rec : records) {
-                    int max_idx = 0, min_idx = 0, count_idx = 0, sum_idx = 0;
                     for (size_t i = 0; i < agg_types_.size(); i++) {
                         int at = agg_types_[i];
                         if (at == ast::AGG_NONE || at == ast::AGG_COUNT_STAR) continue;
-
-                        ColType target_type = TYPE_INT;
-                        int int_val = 0;
-                        int64_t bigint_val = 0;
-                        float float_val = 0.0f;
-                        for (auto& col : child_cols) {
-                            if (col.tab_name == agg_targets_[i].tab_name &&
-                                col.name == agg_targets_[i].col_name) {
-                                target_type = col.type;
-                                if (col.type == TYPE_INT) {
-                                    int_val = *(int*)(rec->data + col.offset);
-                                } else if (col.type == TYPE_BIGINT || col.type == TYPE_DATETIME) {
-                                    bigint_val = *(int64_t*)(rec->data + col.offset);
-                                } else if (col.type == TYPE_FLOAT) {
-                                    float_val = *(float*)(rec->data + col.offset);
-                                }
-                                break;
-                            }
-                        }
-
-                        bool is_bigint = (target_type == TYPE_BIGINT || target_type == TYPE_DATETIME);
-
-                        switch (at) {
-                            case ast::AGG_MAX:
-                                if (is_bigint) {
-                                    if (bigint_val > agg_bigint_max[max_idx]) agg_bigint_max[max_idx] = bigint_val;
-                                } else if (target_type == TYPE_INT) {
-                                    if (int_val > agg_int_max[max_idx]) agg_int_max[max_idx] = int_val;
-                                } else {
-                                    if (float_val > agg_float_max[max_idx]) agg_float_max[max_idx] = float_val;
-                                }
-                                max_idx++;
-                                break;
-                            case ast::AGG_MIN:
-                                if (is_bigint) {
-                                    if (bigint_val < agg_bigint_min[min_idx]) agg_bigint_min[min_idx] = bigint_val;
-                                } else if (target_type == TYPE_INT) {
-                                    if (int_val < agg_int_min[min_idx]) agg_int_min[min_idx] = int_val;
-                                } else {
-                                    if (float_val < agg_float_min[min_idx]) agg_float_min[min_idx] = float_val;
-                                }
-                                min_idx++;
-                                break;
-                            case ast::AGG_COUNT:
-                                agg_count[count_idx]++;
-                                count_idx++;
-                                break;
-                            case ast::AGG_SUM:
-                                if (is_bigint || target_type == TYPE_INT) {
-                                    agg_sum_bigint[sum_idx] += (target_type == TYPE_INT) ? int_val : bigint_val;
-                                } else {
-                                    agg_sum_float[sum_idx] += float_val;
-                                }
-                                sum_idx++;
-                                break;
-                        }
+                        auto cv = read_col(*rec, agg_targets_[i], child_cols);
+                        update_agg(states[i], at, cv);
                     }
                 }
 
-                // 构建结果行
                 auto result = std::make_unique<RmRecord>(len_);
 
                 // 先写入 GROUP BY 列
@@ -454,61 +449,24 @@ class AggregationExecutor : public AbstractExecutor {
                 }
 
                 // 再写入聚合结果
-                int max_idx = 0, min_idx = 0, count_idx = 0, sum_idx = 0;
                 for (size_t i = 0; i < agg_types_.size(); i++) {
                     int at = agg_types_[i];
                     if (at == ast::AGG_NONE) continue;
 
-                    // 找到输出 meta 的索引
                     int meta_idx = (int)group_by_cols_.size();
                     for (size_t j = 0; j < i; j++) {
                         if (agg_types_[j] != ast::AGG_NONE) meta_idx++;
                     }
 
-                    if (meta_idx >= (int)output_meta_.size()) continue;
-
-                    auto& meta = output_meta_[meta_idx];
-                    switch (at) {
-                        case ast::AGG_MAX:
-                            if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
-                                *(int64_t*)(result->data + meta.offset) = agg_bigint_max[max_idx];
-                            } else if (meta.type == TYPE_INT) {
-                                *(int*)(result->data + meta.offset) = agg_int_max[max_idx];
-                            } else {
-                                *(float*)(result->data + meta.offset) = agg_float_max[max_idx];
-                            }
-                            max_idx++;
-                            break;
-                        case ast::AGG_MIN:
-                            if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
-                                *(int64_t*)(result->data + meta.offset) = agg_bigint_min[min_idx];
-                            } else if (meta.type == TYPE_INT) {
-                                *(int*)(result->data + meta.offset) = agg_int_min[min_idx];
-                            } else {
-                                *(float*)(result->data + meta.offset) = agg_float_min[min_idx];
-                            }
-                            min_idx++;
-                            break;
-                        case ast::AGG_COUNT:
-                            *(int*)(result->data + meta.offset) = agg_count[count_idx++];
-                            break;
-                        case ast::AGG_SUM:
-                            if (meta.type == TYPE_BIGINT || meta.type == TYPE_DATETIME) {
-                                *(int64_t*)(result->data + meta.offset) = agg_sum_bigint[sum_idx];
-                            } else if (meta.type == TYPE_INT) {
-                                *(int*)(result->data + meta.offset) = (int)agg_sum_bigint[sum_idx];
-                            } else {
-                                *(float*)(result->data + meta.offset) = agg_sum_float[sum_idx];
-                            }
-                            sum_idx++;
-                            break;
-                        case ast::AGG_COUNT_STAR:
-                            *(int*)(result->data + meta.offset) = count_star;
-                            break;
+                    if (meta_idx < (int)output_meta_.size()) {
+                        if (at == ast::AGG_COUNT_STAR) {
+                            *(int*)(result->data + output_meta_[meta_idx].offset) = count_star;
+                        } else {
+                            write_agg_result(*result, states[i], at, output_meta_[meta_idx]);
+                        }
                     }
                 }
 
-                // 评估 HAVING
                 if (eval_having(*result)) {
                     results_.push_back(std::move(result));
                 }
@@ -517,13 +475,9 @@ class AggregationExecutor : public AbstractExecutor {
         cursor_ = 0;
     }
 
-    void nextTuple() override {
-        cursor_++;
-    }
+    void nextTuple() override { cursor_++; }
 
-    bool is_end() const override {
-        return cursor_ >= results_.size();
-    }
+    bool is_end() const override { return cursor_ >= results_.size(); }
 
     std::unique_ptr<RmRecord> Next() override {
         if (is_end()) return nullptr;
@@ -533,9 +487,7 @@ class AggregationExecutor : public AbstractExecutor {
         return result;
     }
 
-    const std::vector<ColMeta> &cols() const override {
-        return output_meta_;
-    }
+    const std::vector<ColMeta> &cols() const override { return output_meta_; }
 
     size_t tupleLen() const override { return len_; }
 
