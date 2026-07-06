@@ -55,6 +55,29 @@ class UpdateExecutor : public AbstractExecutor {
             context_->lock_mgr_->lock_IX_on_table(context_->txn_, fh_->GetFd());
         }
 
+        // ===== 间隙锁检查：检查更新的索引键是否与活跃扫描范围冲突 =====
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            for (auto& rid : rids_) {
+                auto rec = fh_->get_record(rid, context_);
+                for (size_t i = 0; i < tab_.indexes.size(); ++i) {
+                    auto& index = tab_.indexes[i];
+                    char* key = new char[index.col_tot_len];
+                    int offset = 0;
+                    for (int j = 0; j < index.col_num; ++j) {
+                        memcpy(key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                        offset += index.cols[j].len;
+                    }
+                    std::string key_str(key, index.col_tot_len);
+                    delete[] key;
+                    if (context_->lock_mgr_->check_predicate_conflict(
+                            fh_->GetFd(), key_str, context_->txn_->get_transaction_id())) {
+                        throw TransactionAbortException(context_->txn_->get_transaction_id(),
+                                                         AbortReason::DEADLOCK_PREVENTION);
+                    }
+                }
+            }
+        }
+
         // 遍历所有需要更新的记录
         for (auto& rid : rids_) {
             // 获取行级X锁（排他锁）——仅显式事务需要加锁

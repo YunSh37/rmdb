@@ -108,6 +108,19 @@ class InsertExecutor : public AbstractExecutor {
                 memcpy(key + offset, rec.data + index.cols[j].offset, index.cols[j].len);
                 offset += index.cols[j].len;
             }
+
+            // ===== 间隙锁检查：防止幻读 =====
+            // 仅显式事务需要检查
+            if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+                std::string key_str(key, index.col_tot_len);
+                if (context_->lock_mgr_->check_predicate_conflict(
+                        fh_->GetFd(), key_str, context_->txn_->get_transaction_id())) {
+                    delete[] key;
+                    throw TransactionAbortException(context_->txn_->get_transaction_id(),
+                                                     AbortReason::DEADLOCK_PREVENTION);
+                }
+            }
+
             // 检查键是否已存在
             std::vector<Rid> results;
             if (ih->get_value(key, &results, context_->txn_)) {

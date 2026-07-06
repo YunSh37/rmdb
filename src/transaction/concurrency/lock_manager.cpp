@@ -293,3 +293,119 @@ bool LockManager::unlock(Transaction* txn, LockDataId lock_data_id) {
 
     return true;
 }
+
+/* ========== 间隙锁（谓词范围锁），防止幻读 ========== */
+
+/** 比较两个原始索引键的大小（字节序比较，索引键在 B+Tree 中按字节序排列） */
+static int compare_key_bytes(const std::string& a, const std::string& b) {
+    size_t min_len = std::min(a.size(), b.size());
+    int cmp = memcmp(a.data(), b.data(), min_len);
+    if (cmp != 0) return cmp;
+    if (a.size() < b.size()) return -1;
+    if (a.size() > b.size()) return 1;
+    return 0;
+}
+
+bool LockManager::lock_IS_on_table_with_predicate(Transaction* txn, int tab_fd,
+                                                    const std::string& index_name,
+                                                    const std::string& lower_key, const std::string& upper_key,
+                                                    bool lower_inclusive, bool upper_inclusive, bool is_full_scan) {
+    std::unique_lock<std::mutex> guard(latch_);
+
+    // ===== 两阶段封锁协议检查 =====
+    if (txn->get_state() == TransactionState::SHRINKING) {
+        throw TransactionAbortException(txn->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
+    }
+
+    LockDataId lid(tab_fd, LockDataType::TABLE);
+
+    // ===== 获取 IS 锁 =====
+    auto& queue = lock_table_[lid];
+
+    // 检查是否已持有锁
+    for (auto& req : queue.request_queue_) {
+        if (req.txn_id_ == txn->get_transaction_id() && req.granted_) {
+            // 已持有锁（IS/IX/S/SIX/X），直接注册间隙锁并返回
+            predicate_ranges_.push_back({txn->get_transaction_id(), tab_fd, index_name,
+                                          lower_key, upper_key, lower_inclusive, upper_inclusive, is_full_scan});
+            return true;
+        }
+    }
+
+    // 兼容性检查：IS 与除 X 外的所有模式兼容
+    if (queue.group_lock_mode_ == GroupLockMode::X) {
+        throw TransactionAbortException(txn->get_transaction_id(), AbortReason::DEADLOCK_PREVENTION);
+    }
+
+    // 授予 IS 锁
+    LockRequest req(txn->get_transaction_id(), LockMode::INTENTION_SHARED);
+    req.granted_ = true;
+    queue.request_queue_.push_back(req);
+    queue.group_lock_mode_ = merge_group_mode(queue.group_lock_mode_, LockMode::INTENTION_SHARED);
+
+    txn->get_lock_set()->insert(lid);
+
+    if (txn->get_state() == TransactionState::DEFAULT) {
+        txn->set_state(TransactionState::GROWING);
+    }
+
+    // ===== 在同一临界区内注册间隙锁（消除 TOCTOU 竞态窗口）=====
+    predicate_ranges_.push_back({txn->get_transaction_id(), tab_fd, index_name,
+                                  lower_key, upper_key, lower_inclusive, upper_inclusive, is_full_scan});
+
+    return true;
+}
+
+void LockManager::add_predicate_range(txn_id_t txn_id, int tab_fd, const std::string& index_name,
+                                       const std::string& lower_key, const std::string& upper_key,
+                                       bool lower_inclusive, bool upper_inclusive, bool is_full_scan) {
+    std::unique_lock<std::mutex> guard(latch_);
+    predicate_ranges_.push_back({txn_id, tab_fd, index_name, lower_key, upper_key,
+                                  lower_inclusive, upper_inclusive, is_full_scan});
+}
+
+void LockManager::remove_predicate_ranges(txn_id_t txn_id) {
+    std::unique_lock<std::mutex> guard(latch_);
+    predicate_ranges_.erase(
+        std::remove_if(predicate_ranges_.begin(), predicate_ranges_.end(),
+                       [txn_id](const PredicateRange& r) { return r.txn_id_ == txn_id; }),
+        predicate_ranges_.end());
+}
+
+bool LockManager::check_predicate_conflict(int tab_fd, const std::string& key, txn_id_t requesting_txn) {
+    std::unique_lock<std::mutex> guard(latch_);
+    for (auto& pr : predicate_ranges_) {
+        // 跳过请求事务自己的范围
+        if (pr.txn_id_ == requesting_txn) continue;
+        // 只检查同一张表
+        if (pr.tab_fd_ != tab_fd) continue;
+
+        // 全表扫描范围：任何键都冲突
+        if (pr.is_full_scan_) {
+            return true;
+        }
+
+        // 检查 key 是否在 [lower, upper] 范围内
+        bool below_lower = false;
+        int cmp_low = compare_key_bytes(key, pr.lower_key_);
+        if (pr.lower_inclusive_) {
+            below_lower = (cmp_low < 0);
+        } else {
+            below_lower = (cmp_low <= 0);
+        }
+        if (below_lower) continue;  // key < lower, 不在范围内
+
+        bool above_upper = false;
+        int cmp_up = compare_key_bytes(key, pr.upper_key_);
+        if (pr.upper_inclusive_) {
+            above_upper = (cmp_up > 0);
+        } else {
+            above_upper = (cmp_up >= 0);
+        }
+        if (above_upper) continue;  // key > upper, 不在范围内
+
+        // key 在范围内 → 冲突
+        return true;
+    }
+    return false;
+}

@@ -196,6 +196,8 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
         it = lock_set->erase(it);
         lock_manager_->unlock(txn, lid);
     }
+    // 清理间隙锁（谓词范围锁）
+    lock_manager_->remove_predicate_ranges(txn->get_transaction_id());
     // 3. 清空索引相关资源
     txn->get_index_latch_page_set()->clear();
     txn->get_index_deleted_page_set()->clear();
@@ -255,6 +257,8 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         it = lock_set->erase(it);
         lock_manager_->unlock(txn, lid);
     }
+    // 清理间隙锁（谓词范围锁）
+    lock_manager_->remove_predicate_ranges(txn->get_transaction_id());
     // 3. 清空索引相关资源
     txn->get_index_latch_page_set()->clear();
     txn->get_index_deleted_page_set()->clear();

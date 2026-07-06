@@ -187,10 +187,8 @@ class IndexScanExecutor : public AbstractExecutor {
 
     void beginTuple() override {
         is_end_ = false;
-        // 申请表级S锁（共享锁，防止幻读）——仅显式事务需要加锁
-        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
-            context_->lock_mgr_->lock_shared_on_table(context_->txn_, fh_->GetFd());
-        }
+
+        // 延迟到构建扫描范围后再注册 IS 锁 + 间隙锁（原子操作）
 
         // 获取已打开的索引文件句柄（由sm_manager_统一管理生命周期）
         std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_meta_.cols);
@@ -289,6 +287,36 @@ class IndexScanExecutor : public AbstractExecutor {
         } else {
             // 全索引扫描（没有可用条件限定范围）
             scan_ = std::make_unique<IxScan>(ih_, ih_->leaf_begin(), ih_->leaf_end(), sm_manager_->get_bpm());
+        }
+
+        // ===== 原子操作：获取 IS 锁 + 注册间隙锁（防止幻读）=====
+        // 仅显式事务需要加锁。IS 锁允许其他事务的 IX 锁（并发写入），
+        // 通过间隙锁精确控制范围冲突：只有在扫描范围内的写入才被阻止
+        if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_meta_.cols);
+            bool is_full = false;
+            std::string low_str, up_str;
+            bool has_lower_final = has_lower;
+            bool has_upper_final = has_upper;
+
+            if (exact_match && fed_conds_.size() == index_meta_.cols.size()) {
+                // 点查询：范围即精确匹配键
+                low_str = std::string(lower_key, key_len);
+                up_str = std::string(upper_key, key_len);
+                has_lower_final = true;
+                has_upper_final = true;
+            } else if (has_lower || has_upper) {
+                // 范围扫描
+                low_str = std::string(lower_key, key_len);
+                up_str = std::string(upper_key, key_len);
+            } else {
+                // 全索引扫描（无范围限制）
+                is_full = true;
+            }
+
+            context_->lock_mgr_->lock_IS_on_table_with_predicate(
+                context_->txn_, fh_->GetFd(), ix_name,
+                low_str, up_str, has_lower_final, has_upper_final, is_full);
         }
 
         delete[] lower_key;

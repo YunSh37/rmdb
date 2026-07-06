@@ -12,11 +12,28 @@ See the Mulan PSL v2 for more details. */
 
 #include <mutex>
 #include <list>
+#include <vector>
+#include <string>
+#include <algorithm>
 #include "transaction/transaction.h"
 
 class TransactionManager;  // 前向声明
 
 static const std::string GroupLockModeStr[10] = {"NON_LOCK", "IS", "IX", "S", "X", "SIX"};
+
+/** 索引间隙锁（谓词范围锁），用于防止幻读
+ *  记录事务在索引上的扫描范围，INSERT 时检查是否与活跃范围冲突
+ */
+struct PredicateRange {
+    txn_id_t txn_id_;           // 所属事务ID
+    int tab_fd_;                // 表文件描述符
+    std::string index_name_;    // 索引名称
+    std::string lower_key_;     // 范围下界（原始索引键字节）
+    std::string upper_key_;     // 范围上界（原始索引键字节）
+    bool lower_inclusive_;      // 下界是否包含等号
+    bool upper_inclusive_;      // 上界是否包含等号
+    bool is_full_scan_;         // 是否为全表扫描（无索引的范围查询）
+};
 
 class LockManager {
 public:
@@ -58,8 +75,27 @@ public:
     bool lock_IX_on_table(Transaction* txn, int tab_fd);
     bool unlock(Transaction* txn, LockDataId lock_data_id);
 
+    // ===== 间隙锁（谓词范围锁）接口，防止幻读 =====
+    /** 原子操作：申请表级IS锁 + 注册索引扫描范围（消除TOCTOU竞态窗口） */
+    bool lock_IS_on_table_with_predicate(Transaction* txn, int tab_fd,
+                                          const std::string& index_name,
+                                          const std::string& lower_key, const std::string& upper_key,
+                                          bool lower_inclusive, bool upper_inclusive, bool is_full_scan);
+    /** 注册索引扫描范围 */
+    void add_predicate_range(txn_id_t txn_id, int tab_fd, const std::string& index_name,
+                             const std::string& lower_key, const std::string& upper_key,
+                             bool lower_inclusive, bool upper_inclusive, bool is_full_scan);
+    /** 移除事务的所有谓词范围（在 commit/abort 时调用） */
+    void remove_predicate_ranges(txn_id_t txn_id);
+    /** 检查插入/更新键是否与活跃谓词范围冲突
+     * @return true 表示冲突（应中止请求事务），false 表示无冲突 */
+    bool check_predicate_conflict(int tab_fd, const std::string& key, txn_id_t requesting_txn);
+
 private:
     std::mutex latch_;      // 用于锁表的并发
     std::unordered_map<LockDataId, LockRequestQueue> lock_table_;   // 全局锁表
     TransactionManager* txn_mgr_ = nullptr;  // 事务管理器（用于死锁检测）
+
+    // 间隙锁：所有活跃的索引扫描范围
+    std::vector<PredicateRange> predicate_ranges_;
 };
