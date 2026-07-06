@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #include "ix_index_handle.h"
 
 #include "ix_scan.h"
+#include "recovery/log_manager.h"
 
 /**
  * @brief 在当前node中查找第一个>=target的key_idx
@@ -395,7 +396,8 @@ void IxIndexHandle::insert_into_parent(IxNodeHandle *old_node, const char *key, 
  * @param transaction 事务指针
  * @return page_id_t 插入到的叶结点的page_no
  */
-page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transaction *transaction) {
+page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transaction *transaction,
+                                     const std::string& index_name) {
     // 1. 查找key值应该插入到哪个叶子节点
     auto [leaf, root_latched] = find_leaf_page(key, Operation::INSERT, transaction);
     if (leaf == nullptr) {
@@ -403,6 +405,10 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         // 根节点已在IxManager::create_index中创建
         return -1;
     }
+
+    // 1.5 捕获leaf的修改前镜像（用于物理日志UNDO）
+    char leaf_before[PAGE_SIZE];
+    memcpy(leaf_before, leaf->page->get_data(), PAGE_SIZE);
 
     // 2. 在该叶子节点中插入键值对
     int old_size = leaf->get_size();
@@ -417,7 +423,19 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         // 将新结点的第一个key插入父节点
         char *new_key = new_leaf->get_key(0);
         insert_into_parent(leaf, new_key, new_leaf, transaction);
+
+        // 记录leaf页物理修改（before→after）
+        log_index_page_modify(leaf, leaf_before, transaction, index_name);
+
+        // 记录new_leaf页创建（before=全零, after=当前状态）
+        char zero_page[PAGE_SIZE];
+        memset(zero_page, 0, PAGE_SIZE);
+        log_index_page_modify(new_leaf, zero_page, transaction, index_name);
+
         buffer_pool_manager_->unpin_page(new_leaf->get_page_id(), true);
+    } else {
+        // 记录leaf页物理修改（before→after）
+        log_index_page_modify(leaf, leaf_before, transaction, index_name);
     }
 
     // 更新last_leaf
@@ -434,12 +452,17 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
  * @param key 要删除的key值
  * @param transaction 事务指针
  */
-bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction) {
+bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction,
+                                  const std::string& index_name) {
     // 1. 获取该键值对所在的叶子结点
     auto [leaf, root_latched] = find_leaf_page(key, Operation::DELETE, transaction);
     if (leaf == nullptr) {
         return false;
     }
+
+    // 1.5 捕获leaf的修改前镜像（用于物理日志UNDO）
+    char leaf_before[PAGE_SIZE];
+    memcpy(leaf_before, leaf->page->get_data(), PAGE_SIZE);
 
     // 2. 在该叶子结点中删除键值对
     int old_size = leaf->get_size();
@@ -455,6 +478,9 @@ bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction) {
     // 3. 如果删除成功，处理合并或重分配
     bool root_latched_out = false;
     coalesce_or_redistribute(leaf, transaction, &root_latched_out);
+
+    // 记录leaf页物理修改（before→after）
+    log_index_page_modify(leaf, leaf_before, transaction, index_name);
 
     buffer_pool_manager_->unpin_page(leaf->get_page_id(), true);
     return true;
@@ -857,4 +883,36 @@ void IxIndexHandle::maintain_child(IxNodeHandle *node, int child_idx) {
         child->set_parent_page_no(node->get_page_no());
         buffer_pool_manager_->unpin_page(child->get_page_id(), true);
     }
+}
+
+/**
+ * @brief 物理日志辅助：记录索引页面修改前后的完整镜像
+ * @param node 被修改的页面节点
+ * @param before_image 修改前的页面镜像（已经捕获好的）
+ * @param txn 当前事务（用于获取LogManager和事务ID）
+ * @param index_name 索引名称（用于恢复时定位文件）
+ * @note 调用者需在修改前自行捕获 before_image，本函数捕获 after_image 并写日志
+ */
+void IxIndexHandle::log_index_page_modify(IxNodeHandle* node, const char* before_image,
+                                           Transaction* txn, const std::string& index_name) {
+    if (txn == nullptr || index_name.empty()) return;
+    LogManager* log_mgr = txn->get_log_mgr();
+    if (log_mgr == nullptr) return;
+
+    // 捕获修改后的页面镜像
+    char after_image[PAGE_SIZE];
+    memcpy(after_image, node->page->get_data(), PAGE_SIZE);
+
+    // 创建物理日志记录（含前后镜像，用于REDO/UNDO）
+    IndexPageModifyLogRecord* rec = new IndexPageModifyLogRecord(
+        txn->get_transaction_id(), fd_, node->get_page_no(),
+        before_image, after_image, index_name);
+    rec->prev_lsn_ = txn->get_prev_lsn();
+    lsn_t lsn = log_mgr->add_log_to_buffer(rec);
+    txn->set_prev_lsn(lsn);
+
+    // 设置页面LSN（用于REDO时的LSN比较）
+    node->page->set_page_lsn(lsn);
+
+    delete rec;
 }

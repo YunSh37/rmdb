@@ -40,7 +40,8 @@ See the Mulan PSL v2 for more details. */
  *   - 所有过滤条件涉及的列必须属于同一个索引（防止引入额外扫描）
  *   - 优先选择列数较少的索引（更窄的扫描范围）
  */
-bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
+bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names,
+                              bool enable_range) {
     index_col_names.clear();
 
     // ===== 策略1：等值条件精确匹配（保持原有行为）=====
@@ -54,7 +55,14 @@ bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_c
         return true;  // 精确等值匹配成功
     }
 
-    // ===== 策略2：范围条件匹配索引（含复合索引，带安全约束）=====
+    // ===== 策略2：范围条件匹配索引（仅 enable_range=true 时启用）=====
+    // 该策略用于 SELECT 的间隙锁（题目十）：IndexScan 注册谓词范围锁
+    // DELETE/UPDATE 不需要此策略，使用 SeqScan 即可
+    if (!enable_range) {
+        index_col_names.clear();
+        return false;
+    }
+
     // 收集所有过滤条件涉及的列（去重）和是否有范围条件
     std::set<std::string> filter_col_set;
     bool has_range_cond = false;
@@ -320,7 +328,7 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
 
         // 检查索引
         std::vector<std::string> index_col_names;
-        bool index_exist = get_index_cols(tables[i], curr_conds, index_col_names);
+        bool index_exist = get_index_cols(tables[i], curr_conds, index_col_names, true);
 
         std::shared_ptr<Plan> scan;
         if (index_exist == false) {

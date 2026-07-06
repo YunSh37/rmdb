@@ -26,7 +26,8 @@ enum LogType: int {
     begin,
     commit,
     ABORT,
-    CHECKPOINT
+    CHECKPOINT,
+    INDEX_PAGE_MODIFY   // 索引页物理修改（含前后镜像，用于故障恢复REDO/UNDO）
 };
 static std::string LogTypeStr[] = {
     "UPDATE",
@@ -35,7 +36,8 @@ static std::string LogTypeStr[] = {
     "BEGIN",
     "COMMIT",
     "ABORT",
-    "CHECKPOINT"
+    "CHECKPOINT",
+    "INDEX_PAGE_MODIFY"
 };
 
 class LogRecord {
@@ -490,6 +492,102 @@ public:
     std::vector<std::tuple<std::string, page_id_t, lsn_t>> dpt_entries_; // 脏页表
     size_t att_count_ = 0;
     size_t dpt_count_ = 0;
+};
+
+/** 索引页物理修改日志记录（物理日志）
+ *  记录索引页面修改前后的完整镜像，用于故障恢复：
+ *  - REDO: 将 after_image_ 写入对应页面
+ *  - UNDO: 将 before_image_ 写入对应页面
+ *  采用物理日志而非逻辑日志，防止索引出现不一致状态
+ */
+class IndexPageModifyLogRecord: public LogRecord {
+public:
+    IndexPageModifyLogRecord() {
+        log_type_ = LogType::INDEX_PAGE_MODIFY;
+        lsn_ = INVALID_LSN;
+        log_tot_len_ = LOG_HEADER_SIZE;
+        log_tid_ = INVALID_TXN_ID;
+        prev_lsn_ = INVALID_LSN;
+        fd_ = -1;
+        page_no_ = -1;
+        index_name_ = nullptr;
+        index_name_size_ = 0;
+    }
+
+    IndexPageModifyLogRecord(txn_id_t txn_id, int fd, page_id_t page_no,
+                              const char* before_image, const char* after_image,
+                              const std::string& index_name)
+        : IndexPageModifyLogRecord() {
+        log_tid_ = txn_id;
+        fd_ = fd;
+        page_no_ = page_no;
+        memcpy(before_image_, before_image, PAGE_SIZE);
+        memcpy(after_image_, after_image, PAGE_SIZE);
+        index_name_size_ = index_name.length();
+        index_name_ = new char[index_name_size_ + 1];
+        memcpy(index_name_, index_name.c_str(), index_name_size_);
+        index_name_[index_name_size_] = '\0';
+        // 日志总长度 = 头部 + 前后镜像(2*PAGE_SIZE) + fd + page_no + 索引名
+        log_tot_len_ += sizeof(int);                  // fd
+        log_tot_len_ += sizeof(page_id_t);            // page_no
+        log_tot_len_ += PAGE_SIZE * 2;                // before + after 镜像
+        log_tot_len_ += sizeof(size_t) + index_name_size_;  // 索引名
+    }
+
+    ~IndexPageModifyLogRecord() {
+        if (index_name_ != nullptr) {
+            delete[] index_name_;
+            index_name_ = nullptr;
+        }
+    }
+
+    void serialize(char* dest) const override {
+        LogRecord::serialize(dest);
+        int offset = OFFSET_LOG_DATA;
+        memcpy(dest + offset, &fd_, sizeof(int));
+        offset += sizeof(int);
+        memcpy(dest + offset, &page_no_, sizeof(page_id_t));
+        offset += sizeof(page_id_t);
+        memcpy(dest + offset, before_image_, PAGE_SIZE);
+        offset += PAGE_SIZE;
+        memcpy(dest + offset, after_image_, PAGE_SIZE);
+        offset += PAGE_SIZE;
+        memcpy(dest + offset, &index_name_size_, sizeof(size_t));
+        offset += sizeof(size_t);
+        memcpy(dest + offset, index_name_, index_name_size_);
+    }
+
+    void deserialize(const char* src) override {
+        LogRecord::deserialize(src);
+        int offset = OFFSET_LOG_DATA;
+        fd_ = *reinterpret_cast<const int*>(src + offset);
+        offset += sizeof(int);
+        page_no_ = *reinterpret_cast<const page_id_t*>(src + offset);
+        offset += sizeof(page_id_t);
+        memcpy(before_image_, src + offset, PAGE_SIZE);
+        offset += PAGE_SIZE;
+        memcpy(after_image_, src + offset, PAGE_SIZE);
+        offset += PAGE_SIZE;
+        index_name_size_ = *reinterpret_cast<const size_t*>(src + offset);
+        offset += sizeof(size_t);
+        index_name_ = new char[index_name_size_ + 1];
+        memcpy(index_name_, src + offset, index_name_size_);
+        index_name_[index_name_size_] = '\0';
+    }
+
+    void format_print() override {
+        printf("index page modify record\n");
+        LogRecord::format_print();
+        printf("fd: %d, page_no: %d\n", fd_, page_no_);
+        printf("index name: %s\n", index_name_);
+    }
+
+    int fd_;                       // 索引文件描述符
+    page_id_t page_no_;            // 修改的页面号
+    char before_image_[PAGE_SIZE]; // 修改前页面镜像（用于UNDO）
+    char after_image_[PAGE_SIZE];  // 修改后页面镜像（用于REDO）
+    char* index_name_;             // 索引名称（用于恢复时查找文件）
+    size_t index_name_size_;       // 索引名称大小
 };
 
 /* 日志缓冲区，只有一个buffer，因此需要阻塞地去把日志写入缓冲区中 */

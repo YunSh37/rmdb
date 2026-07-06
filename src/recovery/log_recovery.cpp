@@ -24,6 +24,7 @@ std::unique_ptr<LogRecord> RecoveryManager::parse_log_record(const char* data) {
         case LogType::DELETE:   record = std::make_unique<DeleteLogRecord>(); break;
         case LogType::UPDATE:   record = std::make_unique<UpdateLogRecord>(); break;
         case LogType::CHECKPOINT: record = std::make_unique<CheckpointLogRecord>(); break;
+        case LogType::INDEX_PAGE_MODIFY: record = std::make_unique<IndexPageModifyLogRecord>(); break;
         default: return nullptr;
     }
     record->deserialize(data);
@@ -190,6 +191,17 @@ void RecoveryManager::analyze() {
                 if (dpt_.find(pid) == dpt_.end()) dpt_[pid] = lsn;
                 break;
             }
+            case LogType::INDEX_PAGE_MODIFY: {
+                att_[tid] = lsn;
+                IndexPageModifyLogRecord rec;
+                rec.deserialize(log_data_.data() + start_offset);
+                int fd = get_file_fd_safe(rec.index_name_);
+                if (fd < 0) break;
+                PageId pid{fd, rec.page_no_};
+                if (dpt_.find(pid) == dpt_.end()) dpt_[pid] = lsn;
+                else dpt_[pid] = std::min(dpt_[pid], lsn);
+                break;
+            }
         }
         start_offset += log_len;
     }
@@ -310,6 +322,25 @@ void RecoveryManager::redo() {
                 buffer_pool_manager_->unpin_page(pid, true);
                 break;
             }
+            case LogType::INDEX_PAGE_MODIFY: {
+                IndexPageModifyLogRecord rec;
+                rec.deserialize(log_data_.data() + offset);
+                int fd = get_file_fd_safe(rec.index_name_);
+                if (fd < 0) break;
+                PageId pid{fd, rec.page_no_};
+                if (dpt_.find(pid) == dpt_.end()) break;
+                ensure_page_exists(rec.index_name_, rec.page_no_);
+                Page* page = buffer_pool_manager_->fetch_page(pid);
+                if (page == nullptr) break;
+                if (page->get_page_lsn() < lsn) {
+                    memcpy(page->get_data(), rec.after_image_, PAGE_SIZE);
+                    page->set_page_lsn(lsn);
+                    buffer_pool_manager_->mark_dirty(page);
+                    redo_count++;
+                }
+                buffer_pool_manager_->unpin_page(pid, true);
+                break;
+            }
             default: break;
         }
         offset += log_len;
@@ -365,6 +396,25 @@ void RecoveryManager::undo() {
                     if (fh->is_record(r->rid_))
                         fh->update_record(r->rid_, r->old_record_.data, nullptr);
                     undo_count++;
+                }
+                break;
+            }
+            case LogType::INDEX_PAGE_MODIFY: {
+                auto* r = dynamic_cast<IndexPageModifyLogRecord*>(record.get());
+                if (r) {
+                    int fd = get_file_fd_safe(r->index_name_);
+                    if (fd >= 0) {
+                        ensure_page_exists(r->index_name_, r->page_no_);
+                        PageId pid{fd, r->page_no_};
+                        Page* page = buffer_pool_manager_->fetch_page(pid);
+                        if (page != nullptr) {
+                            // 应用before_image回滚到修改前的状态
+                            memcpy(page->get_data(), r->before_image_, PAGE_SIZE);
+                            buffer_pool_manager_->mark_dirty(page);
+                            buffer_pool_manager_->unpin_page(pid, true);
+                            undo_count++;
+                        }
+                    }
                 }
                 break;
             }

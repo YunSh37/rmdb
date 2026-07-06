@@ -185,14 +185,16 @@ class IxIndexHandle {
                                                  bool find_first = false);
 
     // for insert
-    page_id_t insert_entry(const char *key, const Rid &value, Transaction *transaction);
+    page_id_t insert_entry(const char *key, const Rid &value, Transaction *transaction,
+                           const std::string& index_name = "");
 
     IxNodeHandle *split(IxNodeHandle *node);
 
     void insert_into_parent(IxNodeHandle *old_node, const char *key, IxNodeHandle *new_node, Transaction *transaction);
 
     // for delete
-    bool delete_entry(const char *key, Transaction *transaction);
+    bool delete_entry(const char *key, Transaction *transaction,
+                      const std::string& index_name = "");
 
     bool coalesce_or_redistribute(IxNodeHandle *node, Transaction *transaction = nullptr,
                                 bool *root_is_latched = nullptr);
@@ -233,4 +235,9 @@ class IxIndexHandle {
 
     // for index test
     Rid get_rid(const Iid &iid) const;
+
+    // 物理日志辅助：记录页面修改前后的完整镜像
+    // index_name 用于恢复时定位文件
+    void log_index_page_modify(IxNodeHandle* node, const char* before_image,
+                               Transaction* txn, const std::string& index_name);
 };

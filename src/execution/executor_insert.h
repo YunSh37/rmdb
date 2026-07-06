@@ -155,6 +155,10 @@ class InsertExecutor : public AbstractExecutor {
         }
 
         // 维护索引：将新记录插入所有索引
+        // 设置日志管理器（用于索引物理日志记录）
+        if (context_->txn_ != nullptr && context_->log_mgr_ != nullptr) {
+            context_->txn_->set_log_mgr(context_->log_mgr_);
+        }
         for (size_t i = 0; i < tab_.indexes.size(); ++i) {
             auto& index = tab_.indexes[i];
             std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
@@ -165,7 +169,7 @@ class InsertExecutor : public AbstractExecutor {
                 memcpy(key + offset, rec.data + index.cols[j].offset, index.cols[j].len);
                 offset += index.cols[j].len;
             }
-            ih->insert_entry(key, rid_, context_->txn_);
+            ih->insert_entry(key, rid_, context_->txn_, ix_name);
             delete[] key;
         }
 

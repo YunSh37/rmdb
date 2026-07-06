@@ -57,7 +57,9 @@ class Planner {
 
 
     // int get_indexNo(std::string tab_name, std::vector<Condition> curr_conds);
-    bool get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names);
+    // enable_range: 是否允许范围条件匹配索引（仅SELECT需要，用于间隙锁）
+    bool get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names,
+                        bool enable_range = false);
 
     ColType interp_sv_type(ast::SvType sv_type) {
         std::map<ast::SvType, ColType> m = {

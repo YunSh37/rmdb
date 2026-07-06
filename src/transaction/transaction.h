@@ -19,6 +19,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "txn_defs.h"
 
+class LogManager;  // 前向声明，避免循环依赖
+
 class Transaction {
    public:
     explicit Transaction(txn_id_t txn_id, IsolationLevel isolation_level = IsolationLevel::SERIALIZABLE)
@@ -62,6 +64,9 @@ class Transaction {
 
     inline std::shared_ptr<std::unordered_set<LockDataId>> get_lock_set() { return lock_set_; }
 
+    inline void set_log_mgr(LogManager* log_mgr) { log_mgr_ = log_mgr; }
+    inline LogManager* get_log_mgr() { return log_mgr_; }
+
    private:
     bool txn_mode_;                   // 用于标识当前事务为显式事务还是单条SQL语句的隐式事务
     TransactionState state_;          // 事务状态
@@ -75,4 +80,5 @@ class Transaction {
     std::shared_ptr<std::unordered_set<LockDataId>> lock_set_;  // 事务申请的所有锁
     std::shared_ptr<std::deque<Page*>> index_latch_page_set_;          // 维护事务执行过程中加锁的索引页面
     std::shared_ptr<std::deque<Page*>> index_deleted_page_set_;    // 维护事务执行过程中删除的索引页面
+    LogManager* log_mgr_ = nullptr;  // 日志管理器指针（用于索引物理日志记录）
 };

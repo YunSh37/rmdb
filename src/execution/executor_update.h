@@ -218,10 +218,14 @@ class UpdateExecutor : public AbstractExecutor {
                             delete[] new_key;
                             throw DuplicateKeyError();
                         }
+                        // 设置日志管理器（用于索引物理日志记录）
+                        if (context_->txn_ != nullptr && context_->log_mgr_ != nullptr) {
+                            context_->txn_->set_log_mgr(context_->log_mgr_);
+                        }
                         // 删除旧键
-                        ih->delete_entry(old_keys[i].c_str(), context_->txn_);
+                        ih->delete_entry(old_keys[i].c_str(), context_->txn_, ix_name);
                         // 插入新键
-                        ih->insert_entry(new_key, rid, context_->txn_);
+                        ih->insert_entry(new_key, rid, context_->txn_, ix_name);
                     }
                 }
                 delete[] new_key;
