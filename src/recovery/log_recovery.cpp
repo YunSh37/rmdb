@@ -294,15 +294,8 @@ void RecoveryManager::redo() {
                 fh->update_num_pages(rec.rid_.page_no + 1);
                 auto ph = fh->fetch_page_handle(rec.rid_.page_no);
                 if (ph.page->get_page_lsn() < lsn) {
-                    // 写回删除前的完整记录（用户数据+MVCC头）
                     memcpy(ph.get_slot(rec.rid_.slot_no), rec.deleted_record_.data,
                            rec.deleted_record_.size);
-                    // 设置 xmax 为事务ID，标记此记录已被删除
-                    // MVCC可见性: xmin <= txn_ts < xmax，新事务的ts > log_tid_ 故不可见
-                    char* slot = ph.get_slot(rec.rid_.slot_no);
-                    timestamp_t* xmax = reinterpret_cast<timestamp_t*>(
-                        slot + rec.deleted_record_.size - sizeof(timestamp_t));
-                    *xmax = rec.log_tid_;
                     ph.page->set_page_lsn(lsn);
                     buffer_pool_manager_->mark_dirty(ph.page);
                     redo_count++;
