@@ -309,6 +309,7 @@ static int compare_key_bytes(const std::string& a, const std::string& b) {
 bool LockManager::lock_IS_on_table_with_predicate(Transaction* txn, int tab_fd,
                                                     const std::string& index_name,
                                                     const std::string& lower_key, const std::string& upper_key,
+                                                    bool has_lower, bool has_upper,
                                                     bool lower_inclusive, bool upper_inclusive, bool is_full_scan) {
     std::unique_lock<std::mutex> guard(latch_);
 
@@ -327,7 +328,8 @@ bool LockManager::lock_IS_on_table_with_predicate(Transaction* txn, int tab_fd,
         if (req.txn_id_ == txn->get_transaction_id() && req.granted_) {
             // 已持有锁（IS/IX/S/SIX/X），直接注册间隙锁并返回
             predicate_ranges_.push_back({txn->get_transaction_id(), tab_fd, index_name,
-                                          lower_key, upper_key, lower_inclusive, upper_inclusive, is_full_scan});
+                                          lower_key, upper_key, has_lower, has_upper,
+                                          lower_inclusive, upper_inclusive, is_full_scan});
             return true;
         }
     }
@@ -351,16 +353,19 @@ bool LockManager::lock_IS_on_table_with_predicate(Transaction* txn, int tab_fd,
 
     // ===== 在同一临界区内注册间隙锁（消除 TOCTOU 竞态窗口）=====
     predicate_ranges_.push_back({txn->get_transaction_id(), tab_fd, index_name,
-                                  lower_key, upper_key, lower_inclusive, upper_inclusive, is_full_scan});
+                                  lower_key, upper_key, has_lower, has_upper,
+                                  lower_inclusive, upper_inclusive, is_full_scan});
 
     return true;
 }
 
 void LockManager::add_predicate_range(txn_id_t txn_id, int tab_fd, const std::string& index_name,
                                        const std::string& lower_key, const std::string& upper_key,
+                                       bool has_lower, bool has_upper,
                                        bool lower_inclusive, bool upper_inclusive, bool is_full_scan) {
     std::unique_lock<std::mutex> guard(latch_);
     predicate_ranges_.push_back({txn_id, tab_fd, index_name, lower_key, upper_key,
+                                  has_lower, has_upper,
                                   lower_inclusive, upper_inclusive, is_full_scan});
 }
 
@@ -385,26 +390,31 @@ bool LockManager::check_predicate_conflict(int tab_fd, const std::string& key, t
             return true;
         }
 
-        // 检查 key 是否在 [lower, upper] 范围内
-        bool below_lower = false;
-        int cmp_low = compare_key_bytes(key, pr.lower_key_);
-        if (pr.lower_inclusive_) {
-            below_lower = (cmp_low < 0);
-        } else {
-            below_lower = (cmp_low <= 0);
+        // 检查下界（仅当存在下界条件时）
+        if (pr.has_lower_) {
+            bool below_lower = false;
+            int cmp_low = compare_key_bytes(key, pr.lower_key_);
+            if (pr.lower_inclusive_) {
+                below_lower = (cmp_low < 0);   // key < lower → 不在范围内
+            } else {
+                below_lower = (cmp_low <= 0);  // key <= lower → 不在范围内（> 不含等号）
+            }
+            if (below_lower) continue;  // key 在下界之外，不冲突
         }
-        if (below_lower) continue;  // key < lower, 不在范围内
 
-        bool above_upper = false;
-        int cmp_up = compare_key_bytes(key, pr.upper_key_);
-        if (pr.upper_inclusive_) {
-            above_upper = (cmp_up > 0);
-        } else {
-            above_upper = (cmp_up >= 0);
+        // 检查上界（仅当存在上界条件时）
+        if (pr.has_upper_) {
+            bool above_upper = false;
+            int cmp_up = compare_key_bytes(key, pr.upper_key_);
+            if (pr.upper_inclusive_) {
+                above_upper = (cmp_up > 0);   // key > upper → 不在范围内
+            } else {
+                above_upper = (cmp_up >= 0);  // key >= upper → 不在范围内（< 不含等号）
+            }
+            if (above_upper) continue;  // key 在上界之外，不冲突
         }
-        if (above_upper) continue;  // key > upper, 不在范围内
 
-        // key 在范围内 → 冲突
+        // key 在范围内 → 冲突！
         return true;
     }
     return false;

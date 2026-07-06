@@ -30,8 +30,10 @@ struct PredicateRange {
     std::string index_name_;    // 索引名称
     std::string lower_key_;     // 范围下界（原始索引键字节）
     std::string upper_key_;     // 范围上界（原始索引键字节）
-    bool lower_inclusive_;      // 下界是否包含等号
-    bool upper_inclusive_;      // 上界是否包含等号
+    bool has_lower_;            // 是否存在下界条件
+    bool has_upper_;            // 是否存在上界条件
+    bool lower_inclusive_;      // 下界是否包含等号（>=为true，>为false）
+    bool upper_inclusive_;      // 上界是否包含等号（<=为true，<为false）
     bool is_full_scan_;         // 是否为全表扫描（无索引的范围查询）
 };
 
@@ -80,10 +82,12 @@ public:
     bool lock_IS_on_table_with_predicate(Transaction* txn, int tab_fd,
                                           const std::string& index_name,
                                           const std::string& lower_key, const std::string& upper_key,
+                                          bool has_lower, bool has_upper,
                                           bool lower_inclusive, bool upper_inclusive, bool is_full_scan);
     /** 注册索引扫描范围 */
     void add_predicate_range(txn_id_t txn_id, int tab_fd, const std::string& index_name,
                              const std::string& lower_key, const std::string& upper_key,
+                             bool has_lower, bool has_upper,
                              bool lower_inclusive, bool upper_inclusive, bool is_full_scan);
     /** 移除事务的所有谓词范围（在 commit/abort 时调用） */
     void remove_predicate_ranges(txn_id_t txn_id);

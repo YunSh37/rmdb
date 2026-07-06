@@ -55,7 +55,7 @@ class UpdateExecutor : public AbstractExecutor {
             context_->lock_mgr_->lock_IX_on_table(context_->txn_, fh_->GetFd());
         }
 
-        // ===== 间隙锁检查：检查更新的索引键是否与活跃扫描范围冲突 =====
+        // ===== 间隙锁检查：检查更新的旧索引键 + 新索引键是否与活跃扫描范围冲突 =====
         if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
             for (auto& rid : rids_) {
                 auto rec = fh_->get_record(rid, context_);
@@ -184,6 +184,19 @@ class UpdateExecutor : public AbstractExecutor {
                 for (int j = 0; j < index.col_num; ++j) {
                     memcpy(new_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
                     offset += index.cols[j].len;
+                }
+
+                // ===== 间隙锁检查：检查新键是否落入活跃扫描范围（防止 UPDATE 产生的幻读）=====
+                if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
+                    if (memcmp(new_key, old_keys[i].c_str(), index.col_tot_len) != 0) {
+                        std::string new_key_str(new_key, index.col_tot_len);
+                        if (context_->lock_mgr_->check_predicate_conflict(
+                                fh_->GetFd(), new_key_str, context_->txn_->get_transaction_id())) {
+                            delete[] new_key;
+                            throw TransactionAbortException(context_->txn_->get_transaction_id(),
+                                                             AbortReason::DEADLOCK_PREVENTION);
+                        }
+                    }
                 }
 
                 // 检查是否有索引列被更新

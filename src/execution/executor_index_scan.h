@@ -207,6 +207,8 @@ class IndexScanExecutor : public AbstractExecutor {
 
         bool has_lower = false;  // 是否有下界条件
         bool has_upper = false;  // 是否有上界条件
+        bool lower_inclusive = false;  // 下界是否包含等号（>=为true，>为false）
+        bool upper_inclusive = false;  // 上界是否包含等号（<=为true，<为false）
         bool exact_match = true;  // 是否所有索引列都有等值条件
 
         // 按索引列顺序构建key
@@ -227,16 +229,20 @@ class IndexScanExecutor : public AbstractExecutor {
                     found_eq = true;
                     has_lower = true;
                     has_upper = true;
+                    lower_inclusive = true;
+                    upper_inclusive = true;
                     break;
                 } else if (cond.lhs_col.col_name == col_name && cond.is_rhs_val &&
                           (cond.op == OP_GT || cond.op == OP_GE)) {
                     memcpy(lower_key + col_offset, cond.rhs_val.raw->data, col_len);
                     has_lower = true;
+                    lower_inclusive = (cond.op == OP_GE);  // >=为true, >为false
                     exact_match = false;
                 } else if (cond.lhs_col.col_name == col_name && cond.is_rhs_val &&
                           (cond.op == OP_LT || cond.op == OP_LE)) {
                     memcpy(upper_key + col_offset, cond.rhs_val.raw->data, col_len);
                     has_upper = true;
+                    upper_inclusive = (cond.op == OP_LE);  // <=为true, <为false
                     exact_match = false;
                 }
             }
@@ -298,15 +304,19 @@ class IndexScanExecutor : public AbstractExecutor {
             std::string low_str, up_str;
             bool has_lower_final = has_lower;
             bool has_upper_final = has_upper;
+            bool lower_incl_final = lower_inclusive;
+            bool upper_incl_final = upper_inclusive;
 
             if (exact_match && fed_conds_.size() == index_meta_.cols.size()) {
-                // 点查询：范围即精确匹配键
+                // 点查询：范围即精确匹配键（上下界相同，都包含等号）
                 low_str = std::string(lower_key, key_len);
                 up_str = std::string(upper_key, key_len);
                 has_lower_final = true;
                 has_upper_final = true;
+                lower_incl_final = true;
+                upper_incl_final = true;
             } else if (has_lower || has_upper) {
-                // 范围扫描
+                // 范围扫描：使用已计算的上下界
                 low_str = std::string(lower_key, key_len);
                 up_str = std::string(upper_key, key_len);
             } else {
@@ -316,7 +326,8 @@ class IndexScanExecutor : public AbstractExecutor {
 
             context_->lock_mgr_->lock_IS_on_table_with_predicate(
                 context_->txn_, fh_->GetFd(), ix_name,
-                low_str, up_str, has_lower_final, has_upper_final, is_full);
+                low_str, up_str, has_lower_final, has_upper_final,
+                lower_incl_final, upper_incl_final, is_full);
         }
 
         delete[] lower_key;
