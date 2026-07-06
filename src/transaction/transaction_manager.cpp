@@ -149,6 +149,9 @@ Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manage
     TransactionManager::txn_map[txn->get_transaction_id()] = txn;
     lock.unlock();
 
+    // 4. 设置事务状态为 GROWING（两阶段封锁的锁获取阶段）
+    txn->set_state(TransactionState::GROWING);
+
     // WAL日志：记录事务BEGIN
     if (log_manager != nullptr) {
         BeginLogRecord* log_rec = new BeginLogRecord(txn->get_transaction_id());
@@ -167,6 +170,9 @@ Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manage
  * @param {LogManager*} log_manager 日志管理器指针
  */
 void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
+    // 两阶段封锁：进入 SHRINKING 阶段（之后只能释放锁，不能获取锁）
+    txn->set_state(TransactionState::SHRINKING);
+
     // WAL日志：记录事务COMMIT（在释放锁之前写日志，确保持久化）
     if (log_manager != nullptr) {
         CommitLogRecord* log_rec = new CommitLogRecord(txn->get_transaction_id());

@@ -150,9 +150,9 @@ class SeqScanExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-        // 申请表级IS锁（意向共享锁）——仅显式事务需要加锁
+        // 申请表级S锁（共享锁，防止幻读）——仅显式事务需要加锁
         if (context_->txn_ != nullptr && context_->lock_mgr_ != nullptr && context_->txn_->get_txn_mode()) {
-            context_->lock_mgr_->lock_IS_on_table(context_->txn_, fh_->GetFd());
+            context_->lock_mgr_->lock_shared_on_table(context_->txn_, fh_->GetFd());
         }
 
         // 创建 RmScan 迭代器

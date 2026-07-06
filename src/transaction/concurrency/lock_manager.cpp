@@ -11,20 +11,17 @@ See the Mulan PSL v2 for more details. */
 #include "lock_manager.h"
 #include "transaction/transaction_manager.h"
 #include <algorithm>
-#include <unordered_set>
-#include <chrono>
-#include <thread>
 
 /* ========== 锁兼容矩阵 ========== */
 // 检查新申请的 lock_mode 是否与队列当前的 group_lock_mode 兼容
+// 兼容矩阵：
+//           IS  IX  S   X  SIX  NON_LOCK
+// IS        Y   Y   Y   N  Y    Y
+// IX        Y   Y   N   N  N    Y
+// S         Y   N   Y   N  N    Y
+// X         N   N   N   N  N    Y
+// SIX       Y   N   N   N  N    Y
 static bool is_compatible(LockManager::LockMode req_mode, LockManager::GroupLockMode group_mode) {
-    // 兼容矩阵：
-    //           IS  IX  S   X  SIX  NON_LOCK
-    // IS        Y   Y   Y   N  Y    Y
-    // IX        Y   Y   N   N  N    Y
-    // S         Y   N   Y   N  N    Y
-    // X         N   N   N   N  N    Y
-    // SIX       Y   N   N   N  N    Y
     switch (req_mode) {
         case LockManager::LockMode::INTENTION_SHARED:
             return group_mode != LockManager::GroupLockMode::X;
@@ -81,97 +78,21 @@ static LockManager::GroupLockMode merge_group_mode(LockManager::GroupLockMode cu
     }
 }
 
-/* ========== 死锁检测：等待图 ========== */
-// 全局等待图：waiter → holder（waiter等待holder释放锁）
-static std::mutex wait_graph_mutex;
-static std::unordered_map<txn_id_t, std::unordered_set<txn_id_t>> wait_for_graph;
-
-static void add_wait_edge(txn_id_t waiter, txn_id_t holder) {
-    std::lock_guard<std::mutex> lock(wait_graph_mutex);
-    wait_for_graph[waiter].insert(holder);
-}
-
-static void remove_wait_edges(txn_id_t txn) {
-    std::lock_guard<std::mutex> lock(wait_graph_mutex);
-    wait_for_graph.erase(txn);
-    for (auto& pair : wait_for_graph) {
-        pair.second.erase(txn);
-    }
-}
-
-// DFS 检测从 start 出发是否存在环
-static bool dfs_cycle(txn_id_t start, txn_id_t current,
-                      std::unordered_set<txn_id_t>& visited,
-                      std::unordered_set<txn_id_t>& in_stack,
-                      std::vector<txn_id_t>& cycle_path) {
-    visited.insert(current);
-    in_stack.insert(current);
-    cycle_path.push_back(current);
-
-    auto it = wait_for_graph.find(current);
-    if (it != wait_for_graph.end()) {
-        for (txn_id_t next : it->second) {
-            if (next == start) {
-                cycle_path.push_back(start);
-                return true;  // 找到环
-            }
-            if (in_stack.count(next) == 0) {
-                if (dfs_cycle(start, next, visited, in_stack, cycle_path)) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    cycle_path.pop_back();
-    in_stack.erase(current);
-    return false;
-}
-
-// 检测等待图中是否有环，返回环中的事务ID列表（若存在）
-static std::vector<txn_id_t> detect_cycle() {
-    std::lock_guard<std::mutex> lock(wait_graph_mutex);
-    std::unordered_set<txn_id_t> visited;
-
-    for (auto& pair : wait_for_graph) {
-        if (visited.count(pair.first) == 0) {
-            std::unordered_set<txn_id_t> in_stack;
-            std::vector<txn_id_t> cycle_path;
-            if (dfs_cycle(pair.first, pair.first, visited, in_stack, cycle_path)) {
-                return cycle_path;
-            }
-        }
-    }
-    return {};
-}
-
-// 选择环中最年轻的事务（最大时间戳）作为牺牲品
-static txn_id_t pick_victim(const std::vector<txn_id_t>& cycle, TransactionManager* txn_mgr) {
-    txn_id_t victim = cycle[0];
-    timestamp_t max_ts = 0;
-
-    for (txn_id_t tid : cycle) {
-        Transaction* txn = txn_mgr->get_transaction(tid);
-        if (txn != nullptr) {
-            timestamp_t ts = txn->get_start_ts();
-            if (ts > max_ts) {
-                max_ts = ts;
-                victim = tid;
-            }
-        }
-    }
-    return victim;
-}
-
-/* ========== 锁申请核心逻辑 ========== */
+/* ========== 死锁预防：NO-WAIT 策略 ========== */
+// 不再使用等待图和死锁检测：当锁请求不兼容时立即中止请求事务，
+// 避免形成等待链，从而预防死锁。
 
 /**
- * @description: 通用加锁方法
+ * @description: 通用加锁方法（NO-WAIT 死锁预防 + 两阶段封锁）
+ *   1. 检查 2PL 协议：SHRINKING 状态不允许申请锁
+ *   2. 检查是否已持有相同/更强的锁（锁升级路径含兼容性检查）
+ *   3. 兼容 → 直接授予锁
+ *   4. 不兼容 → 立即中止当前事务（NO-WAIT）
  * @param txn 申请锁的事务
  * @param lid 锁对象ID
  * @param mode 锁模式
- * @param txn_mgr 事务管理器（用于死锁检测时选择牺牲者）
- * @return 加锁是否成功
+ * @return 加锁是否成功（成功后保证持有该锁）
+ * @throws TransactionAbortException 当锁请求无法立即满足时
  */
 static bool lock_common(Transaction* txn, LockDataId& lid, LockManager::LockMode mode,
                         LockManager* lm, std::mutex& latch,
@@ -180,17 +101,38 @@ static bool lock_common(Transaction* txn, LockDataId& lid, LockManager::LockMode
 
     std::unique_lock<std::mutex> guard(latch);
 
+    // ===== 两阶段封锁协议检查 =====
+    // SHRINKING 阶段不允许获取新锁（违反 2PL）
+    if (txn->get_state() == TransactionState::SHRINKING) {
+        throw TransactionAbortException(txn->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
+    }
+
     // 获取或创建锁请求队列
     auto& queue = lock_table[lid];
 
-    // 检查是否已经持有锁（同一事务不会与自己冲突）
-    // 若已持有相同或更强的锁则直接返回；若持有较弱锁则升级
+    // ===== 检查是否已持有锁（同一事务不会与自己冲突）=====
+    // 若已持有相同或更强的锁则直接返回；若持有较弱锁则尝试升级
     for (auto& req : queue.request_queue_) {
         if (req.txn_id_ == txn->get_transaction_id() && req.granted_) {
+            // 已持有相同或更强的锁
             if (req.lock_mode_ == mode || req.lock_mode_ == LockManager::LockMode::EXLUCSIVE) {
-                return true;  // 已持有相同或更强的锁
+                return true;
             }
-            // 锁升级：更新锁模式并重新计算 group_lock_mode
+
+            // ===== 锁升级：检查与其他已授予锁的兼容性 =====
+            // 计算除当前事务外其他所有已授予锁的 group_mode
+            LockManager::GroupLockMode other_gm = LockManager::GroupLockMode::NON_LOCK;
+            for (auto& r : queue.request_queue_) {
+                if (r.txn_id_ != txn->get_transaction_id() && r.granted_) {
+                    other_gm = merge_group_mode(other_gm, r.lock_mode_);
+                }
+            }
+            // 若新模式与其他持有者不兼容 → 升级冲突，中止当前事务
+            if (!is_compatible(mode, other_gm)) {
+                throw TransactionAbortException(txn->get_transaction_id(), AbortReason::UPGRADE_CONFLICT);
+            }
+
+            // 执行锁升级：更新锁模式并重新计算 group_lock_mode
             req.lock_mode_ = mode;
             queue.group_lock_mode_ = LockManager::GroupLockMode::NON_LOCK;
             for (auto& r : queue.request_queue_) {
@@ -202,7 +144,7 @@ static bool lock_common(Transaction* txn, LockDataId& lid, LockManager::LockMode
         }
     }
 
-    // 检查是否与已授予的锁兼容
+    // ===== 兼容性检查：NO-WAIT 策略 =====
     if (is_compatible(mode, queue.group_lock_mode_)) {
         // 兼容：直接授予锁
         LockManager::LockRequest req(txn->get_transaction_id(), mode);
@@ -212,81 +154,17 @@ static bool lock_common(Transaction* txn, LockDataId& lid, LockManager::LockMode
 
         // 记录到事务的锁集合
         txn->get_lock_set()->insert(lid);
+
+        // 首次获取锁时，将状态从 DEFAULT 切换到 GROWING
+        if (txn->get_state() == TransactionState::DEFAULT) {
+            txn->set_state(TransactionState::GROWING);
+        }
         return true;
     }
 
-    // 不兼容：需要等待
-    // 构建等待边（waiter等待所有已授予锁的持有者）
-    for (auto& req : queue.request_queue_) {
-        if (req.granted_ && req.txn_id_ != txn->get_transaction_id()) {
-            add_wait_edge(txn->get_transaction_id(), req.txn_id_);
-        }
-    }
-
-    // 死锁检测
-    auto cycle = detect_cycle();
-    if (!cycle.empty()) {
-        // 清理等待边
-        for (auto& req : queue.request_queue_) {
-            if (req.granted_) {
-                remove_wait_edges(txn->get_transaction_id());
-            }
-        }
-        txn_id_t victim = pick_victim(cycle, txn_mgr);
-        // 从锁表中移除牺牲者的等待请求
-        for (auto& table_pair : lock_table) {
-            auto& q = table_pair.second;
-            q.request_queue_.remove_if([victim](const LockManager::LockRequest& r) {
-                return r.txn_id_ == victim && !r.granted_;
-            });
-        }
-        // 清理牺牲者的等待边
-        remove_wait_edges(victim);
-        // 唤醒等待的线程
-        queue.cv_.notify_all();
-
-        if (victim == txn->get_transaction_id()) {
-            throw TransactionAbortException(victim, AbortReason::DEADLOCK_PREVENTION);
-        }
-        // 如果牺牲者不是当前事务，当前事务仍然需要等待，递归重试加锁
-        // 但需要先清理当前事务的等待边（因为牺牲者已被清除）
-    }
-
-    // 加入等待队列
-    LockManager::LockRequest req(txn->get_transaction_id(), mode);
-    req.granted_ = false;
-    queue.request_queue_.push_back(req);
-
-    // 阻塞等待，直到被唤醒
-    queue.cv_.wait(guard, [&]() {
-        // 检查是否可以被授予
-        // 重新计算当前队列中排在此请求前的所有已授予锁的 group_mode
-        LockManager::GroupLockMode gm = LockManager::GroupLockMode::NON_LOCK;
-        for (auto& r : queue.request_queue_) {
-            if (&r == &req) break;  // 只考虑排在此请求前的
-            if (r.granted_) {
-                gm = merge_group_mode(gm, r.lock_mode_);
-            }
-        }
-        return is_compatible(mode, gm);
-    });
-
-    // 被唤醒，授予锁
-    for (auto& r : queue.request_queue_) {
-        if (r.txn_id_ == txn->get_transaction_id() && !r.granted_) {
-            r.granted_ = true;
-            break;
-        }
-    }
-    queue.group_lock_mode_ = merge_group_mode(queue.group_lock_mode_, mode);
-
-    // 清理等待边
-    remove_wait_edges(txn->get_transaction_id());
-
-    // 记录到事务的锁集合
-    txn->get_lock_set()->insert(lid);
-
-    return true;
+    // ===== NO-WAIT：不兼容则立即中止请求事务 =====
+    // 不进入等待队列，避免形成等待链，从而预防死锁
+    throw TransactionAbortException(txn->get_transaction_id(), AbortReason::DEADLOCK_PREVENTION);
 }
 
 /**
@@ -339,6 +217,8 @@ bool LockManager::lock_IX_on_table(Transaction* txn, int tab_fd) {
 
 /**
  * @description: 释放锁
+ *   将事务的锁请求从队列中移除，重新计算 group_lock_mode。
+ *   NO-WAIT 策略下无需唤醒等待者（无人等待）。
  */
 bool LockManager::unlock(Transaction* txn, LockDataId lock_data_id) {
     std::unique_lock<std::mutex> guard(latch_);
@@ -363,14 +243,8 @@ bool LockManager::unlock(Transaction* txn, LockDataId lock_data_id) {
         }
     }
 
-    // 唤醒等待者
-    queue.cv_.notify_all();
-
     // 从事务的锁集合中移除
     txn->get_lock_set()->erase(lock_data_id);
-
-    // 清理等待边
-    remove_wait_edges(txn->get_transaction_id());
 
     return true;
 }
