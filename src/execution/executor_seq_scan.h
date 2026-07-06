@@ -53,6 +53,10 @@ class SeqScanExecutor : public AbstractExecutor {
                 int lhs_val = *(int*)lhs_data;
                 int rhs_val = cond.rhs_val.int_val;
                 if (!cmp_int(lhs_val, rhs_val, cond.op)) return false;
+            } else if (type == TYPE_BIGINT || type == TYPE_DATETIME) {
+                int64_t lhs_val = *(int64_t*)lhs_data;
+                int64_t rhs_val = (type == TYPE_DATETIME) ? cond.rhs_val.datetime_val : cond.rhs_val.bigint_val;
+                if (!cmp_bigint(lhs_val, rhs_val, cond.op)) return false;
             } else if (type == TYPE_FLOAT) {
                 float lhs_val = *(float*)lhs_data;
                 float rhs_val = cond.rhs_val.float_val;
@@ -69,6 +73,18 @@ class SeqScanExecutor : public AbstractExecutor {
     }
 
     static bool cmp_int(int lhs, int rhs, CompOp op) {
+        switch (op) {
+            case OP_EQ: return lhs == rhs;
+            case OP_NE: return lhs != rhs;
+            case OP_LT: return lhs < rhs;
+            case OP_GT: return lhs > rhs;
+            case OP_LE: return lhs <= rhs;
+            case OP_GE: return lhs >= rhs;
+            default: return false;
+        }
+    }
+
+    static bool cmp_bigint(int64_t lhs, int64_t rhs, CompOp op) {
         switch (op) {
             case OP_EQ: return lhs == rhs;
             case OP_NE: return lhs != rhs;

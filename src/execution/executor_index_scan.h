@@ -52,6 +52,18 @@ class IndexScanExecutor : public AbstractExecutor {
         }
     }
 
+    int cmp_bigint(int64_t a, int64_t b, CompOp op) {
+        switch (op) {
+            case OP_EQ: return a == b;
+            case OP_NE: return a != b;
+            case OP_LT: return a < b;
+            case OP_GT: return a > b;
+            case OP_LE: return a <= b;
+            case OP_GE: return a >= b;
+            default: return false;
+        }
+    }
+
     int cmp_float(float a, float b, CompOp op) {
         switch (op) {
             case OP_EQ: return a == b;
@@ -93,6 +105,10 @@ class IndexScanExecutor : public AbstractExecutor {
                     int lhs = *(int*)lhs_ptr;
                     int rhs = *(int*)cond.rhs_val.raw->data;
                     if (!cmp_int(lhs, rhs, cond.op)) return false;
+                } else if (type == TYPE_BIGINT || type == TYPE_DATETIME) {
+                    int64_t lhs = *(int64_t*)lhs_ptr;
+                    int64_t rhs = *(int64_t*)cond.rhs_val.raw->data;
+                    if (!cmp_bigint(lhs, rhs, cond.op)) return false;
                 } else if (type == TYPE_FLOAT) {
                     float lhs = *(float*)lhs_ptr;
                     float rhs = *(float*)cond.rhs_val.raw->data;
@@ -109,6 +125,10 @@ class IndexScanExecutor : public AbstractExecutor {
                     int lhs = *(int*)lhs_ptr;
                     int rhs = *(int*)rhs_ptr;
                     if (!cmp_int(lhs, rhs, cond.op)) return false;
+                } else if (type == TYPE_BIGINT || type == TYPE_DATETIME) {
+                    int64_t lhs = *(int64_t*)lhs_ptr;
+                    int64_t rhs = *(int64_t*)rhs_ptr;
+                    if (!cmp_bigint(lhs, rhs, cond.op)) return false;
                 } else if (type == TYPE_FLOAT) {
                     float lhs = *(float*)lhs_ptr;
                     float rhs = *(float*)rhs_ptr;

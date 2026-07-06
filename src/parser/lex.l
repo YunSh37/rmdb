@@ -14,6 +14,8 @@
 #include "ast.h"
 #include "yacc.tab.h"
 #include <iostream>
+#include <cerrno>
+#include <climits>
 
 // automatically update location
 #define YY_USER_ACTION \
@@ -75,6 +77,7 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "SET" { return SET; }
 "SELECT" { return SELECT; }
 "INT" { return INT; }
+"BIGINT" { return BIGINT; }
 "CHAR" { return CHAR; }
 "FLOAT" { return FLOAT; }
 "INDEX" { return INDEX; }
@@ -99,9 +102,10 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "GROUP"     { return GROUP; }
 "HAVING"    { return HAVING; }
 "LIMIT"     { return LIMIT; }
-"TRUE" { 
+"DATETIME"  { return DATETIME; }
+"TRUE" {
     yylval->sv_bool = true;
-    return VALUE_BOOL; 
+    return VALUE_BOOL;
 }
 "FALSE" {
     yylval->sv_bool = false;
@@ -119,7 +123,19 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 }
     /* literals */
 {value_int} {
-    yylval->sv_int = atoi(yytext);
+    errno = 0;
+    long long val = strtoll(yytext, nullptr, 10);
+    if (errno == ERANGE || val > INT64_MAX || val < INT64_MIN) {
+        // 溢出：设为 int64_t 最大值/最小值标记，后续按 bigint 处理
+        yylval->sv_bigint = (yytext[0] == '-') ? INT64_MIN : INT64_MAX;
+        yylval->sv_int = 0;
+        return VALUE_BIGINT;
+    }
+    if (val > INT32_MAX || val < INT32_MIN) {
+        yylval->sv_bigint = (int64_t)val;
+        return VALUE_BIGINT;
+    }
+    yylval->sv_int = (int)val;
     return VALUE_INT;
 }
 {value_float} {

@@ -95,6 +95,11 @@ class SortExecutor : public AbstractExecutor {
             int vb = *(int*)(b.data + col_meta.offset);
             if (va < vb) cmp = -1;
             else if (va > vb) cmp = 1;
+        } else if (type == TYPE_BIGINT || type == TYPE_DATETIME) {
+            int64_t va = *(int64_t*)(a.data + col_meta.offset);
+            int64_t vb = *(int64_t*)(b.data + col_meta.offset);
+            if (va < vb) cmp = -1;
+            else if (va > vb) cmp = 1;
         } else if (type == TYPE_FLOAT) {
             float va = *(float*)(a.data + col_meta.offset);
             float vb = *(float*)(b.data + col_meta.offset);

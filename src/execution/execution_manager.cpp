@@ -245,8 +245,15 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             char *rec_buf = Tuple->data + col.offset;
             if (col.type == TYPE_INT) {
                 col_str = std::to_string(*(int *)rec_buf);
+            } else if (col.type == TYPE_BIGINT) {
+                col_str = std::to_string(*(int64_t *)rec_buf);
+            } else if (col.type == TYPE_DATETIME) {
+                col_str = datetime_format(*(int64_t *)rec_buf);
             } else if (col.type == TYPE_FLOAT) {
-                col_str = std::to_string(*(float *)rec_buf);
+                // 6 位小数精度
+                std::ostringstream oss;
+                oss << std::fixed << std::setprecision(6) << *(float *)rec_buf;
+                col_str = oss.str();
             } else if (col.type == TYPE_STRING) {
                 col_str = std::string((char *)rec_buf, col.len);
                 col_str.resize(strlen(col_str.c_str()));

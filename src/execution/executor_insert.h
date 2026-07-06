@@ -50,10 +50,29 @@ class InsertExecutor : public AbstractExecutor {
             auto &col = tab_.cols[i];
             auto &val = values_[i];
             if (col.type != val.type) {
-                // 允许 INT→FLOAT 隐式转换（例如 INSERT INTO t VALUES(1, 95)，score 为 FLOAT）
-                if (col.type == TYPE_FLOAT && val.type == TYPE_INT) {
+                // 允许 INT→BIGINT 隐式转换
+                if (col.type == TYPE_BIGINT && val.type == TYPE_INT) {
+                    val.type = TYPE_BIGINT;
+                    val.bigint_val = static_cast<int64_t>(val.int_val);
+                } else if (col.type == TYPE_BIGINT && val.type == TYPE_BIGINT) {
+                    // BIGINT 列接受 BIGINT 值，检查范围
+                    if (val.bigint_val > INT64_MAX || val.bigint_val < INT64_MIN) {
+                        throw IncompatibleTypeError(coltype2str(col.type), coltype2str(val.type));
+                    }
+                } else if (col.type == TYPE_INT && val.type == TYPE_BIGINT) {
+                    // BIGINT 值无法安全转为 INT，报错
+                    throw IncompatibleTypeError(coltype2str(col.type), coltype2str(val.type));
+                } else if (col.type == TYPE_FLOAT && val.type == TYPE_INT) {
+                    // 允许 INT→FLOAT 隐式转换
                     val.type = TYPE_FLOAT;
                     val.float_val = static_cast<float>(val.int_val);
+                } else if (col.type == TYPE_FLOAT && val.type == TYPE_BIGINT) {
+                    // 允许 BIGINT→FLOAT 隐式转换
+                    val.type = TYPE_FLOAT;
+                    val.float_val = static_cast<float>(val.bigint_val);
+                } else if (col.type == TYPE_DATETIME && val.type == TYPE_STRING) {
+                    // 字符串→DATETIME 转换，解析并验证 'YYYY-MM-DD HH:MM:SS'
+                    val.set_datetime(datetime_parse(val.str_val));
                 } else {
                     throw IncompatibleTypeError(coltype2str(col.type), coltype2str(val.type));
                 }

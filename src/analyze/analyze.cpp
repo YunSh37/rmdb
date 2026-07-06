@@ -375,7 +375,6 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
         ColType lhs_type = lhs_col->type;
         ColType rhs_type;
         if (cond.is_rhs_val) {
-            cond.rhs_val.init_raw(lhs_col->len);
             rhs_type = cond.rhs_val.type;
         } else {
             TabMeta &rhs_tab = sm_manager_->db_.get_table(cond.rhs_col.tab_name);
@@ -383,16 +382,36 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
             rhs_type = rhs_col->type;
         }
         if (lhs_type != rhs_type) {
-            // 允许 INT→FLOAT 隐式转换（例如 WHERE score > 90，score 为 FLOAT）
-            if (lhs_type == TYPE_FLOAT && rhs_type == TYPE_INT && cond.is_rhs_val) {
+            // 允许 INT→BIGINT 隐式转换
+            if (lhs_type == TYPE_BIGINT && rhs_type == TYPE_INT && cond.is_rhs_val) {
+                cond.rhs_val.type = TYPE_BIGINT;
+                cond.rhs_val.bigint_val = static_cast<int64_t>(cond.rhs_val.int_val);
+            } else if (lhs_type == TYPE_INT && rhs_type == TYPE_BIGINT && cond.is_rhs_val) {
+                // rhs 是 BIGINT，无法转为 INT（范围不兼容），报错
+                throw IncompatibleTypeError(coltype2str(lhs_type), coltype2str(rhs_type));
+            } else if (lhs_type == TYPE_FLOAT && rhs_type == TYPE_INT && cond.is_rhs_val) {
+                // 允许 INT→FLOAT 隐式转换（例如 WHERE score > 90，score 为 FLOAT）
                 cond.rhs_val.type = TYPE_FLOAT;
                 cond.rhs_val.float_val = static_cast<float>(cond.rhs_val.int_val);
+            } else if (lhs_type == TYPE_FLOAT && rhs_type == TYPE_BIGINT && cond.is_rhs_val) {
+                cond.rhs_val.type = TYPE_FLOAT;
+                cond.rhs_val.float_val = static_cast<float>(cond.rhs_val.bigint_val);
             } else if (lhs_type == TYPE_INT && rhs_type == TYPE_FLOAT && cond.is_rhs_val) {
                 // INT 列与 FLOAT 值比较（不常见但也允许）
                 // rhs 已经是 FLOAT，不需要转换
+            } else if (lhs_type == TYPE_DATETIME && rhs_type == TYPE_STRING && cond.is_rhs_val) {
+                // WHERE 条件中字符串→DATETIME 转换
+                cond.rhs_val.set_datetime(datetime_parse(cond.rhs_val.str_val));
+            } else if (lhs_type == TYPE_DATETIME && cond.is_rhs_val) {
+                // DATETIME 列与其他类型值比较
+                throw IncompatibleTypeError(coltype2str(lhs_type), coltype2str(rhs_type));
             } else {
                 throw IncompatibleTypeError(coltype2str(lhs_type), coltype2str(rhs_type));
             }
+        }
+        // 类型检查完毕后，再初始化 raw（使用正确的类型）
+        if (cond.is_rhs_val) {
+            cond.rhs_val.init_raw(lhs_col->len);
         }
     }
 }
@@ -401,9 +420,18 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
 Value Analyze::convert_sv_value(const std::shared_ptr<ast::Value> &sv_val) {
     Value val;
     if (auto int_lit = std::dynamic_pointer_cast<ast::IntLit>(sv_val)) {
-        val.set_int(int_lit->val);
+        // int64_t 值在 int32 范围内 → TYPE_INT，否则 → TYPE_BIGINT
+        if (int_lit->val > INT32_MAX || int_lit->val < INT32_MIN) {
+            val.set_bigint(int_lit->val);
+        } else {
+            val.set_int(static_cast<int>(int_lit->val));
+        }
+    } else if (auto bigint_lit = std::dynamic_pointer_cast<ast::BigIntLit>(sv_val)) {
+        val.set_bigint(bigint_lit->val);
     } else if (auto float_lit = std::dynamic_pointer_cast<ast::FloatLit>(sv_val)) {
         val.set_float(float_lit->val);
+    } else if (auto datetime_lit = std::dynamic_pointer_cast<ast::DatetimeLit>(sv_val)) {
+        val.set_datetime(datetime_lit->val);
     } else if (auto str_lit = std::dynamic_pointer_cast<ast::StringLit>(sv_val)) {
         val.set_str(str_lit->val);
     } else {

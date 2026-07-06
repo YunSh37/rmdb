@@ -131,6 +131,10 @@ class Portal
                 if (cond.is_rhs_val) {
                     if (cond.rhs_val.type == TYPE_INT)
                         ss << cond.rhs_val.int_val;
+                    else if (cond.rhs_val.type == TYPE_BIGINT)
+                        ss << cond.rhs_val.bigint_val;
+                    else if (cond.rhs_val.type == TYPE_DATETIME)
+                        ss << datetime_format(cond.rhs_val.datetime_val);
                     else if (cond.rhs_val.type == TYPE_FLOAT)
                         ss << std::fixed << std::setprecision(6) << cond.rhs_val.float_val;
                     else if (cond.rhs_val.type == TYPE_STRING)

@@ -424,13 +424,21 @@ std::shared_ptr<Plan> Planner::generate_aggregation_plan(std::shared_ptr<Query> 
                 agg_len = sizeof(int);
             } else {
                 // MAX/MIN/SUM: 结果类型与目标列相同
+                ColType target_type = TYPE_INT;
                 for (auto& col : all_cols) {
                     if (col.tab_name == query->agg_targets[i].tab_name &&
                         col.name == query->agg_targets[i].col_name) {
-                        agg_result_type = col.type;
+                        target_type = col.type;
                         agg_len = col.len;
                         break;
                     }
+                }
+                // SUM(INT) → BIGINT 防止溢出
+                if (agg_type == ast::AGG_SUM && target_type == TYPE_INT) {
+                    agg_result_type = TYPE_BIGINT;
+                    agg_len = sizeof(int64_t);
+                } else {
+                    agg_result_type = target_type;
                 }
             }
 

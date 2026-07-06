@@ -379,8 +379,8 @@ static void yynoreturn yy_fatal_error ( const char* msg  );
 	(yy_hold_char) = *yy_cp; \
 	*yy_cp = '\0'; \
 	(yy_c_buf_p) = yy_cp;
-#define YY_NUM_RULES 63
-#define YY_END_OF_BUFFER 64
+#define YY_NUM_RULES 65
+#define YY_END_OF_BUFFER 66
 /* This struct is not used in this scanner,
    but its presence is necessary. */
 struct yy_trans_info
@@ -388,34 +388,35 @@ struct yy_trans_info
 	flex_int32_t yy_verify;
 	flex_int32_t yy_nxt;
 	};
-static const flex_int16_t yy_accept[233] =
+static const flex_int16_t yy_accept[245] =
     {   0,
-        0,    0,    0,    0,   64,   62,    6,    7,    7,   62,
-       57,   62,   62,   62,   59,   57,   57,   58,   58,   58,
-       58,   58,   58,   58,   58,   58,   58,   58,   58,   58,
-       58,   58,   58,   58,   58,   58,   58,    3,    4,    6,
-        7,    0,   61,   59,    5,    1,   60,   55,   56,   54,
-       58,   58,   58,   48,   58,   38,   58,   58,   58,   58,
-       58,   58,   58,   58,   58,   58,   58,   58,   58,   58,
-       58,   58,   58,   58,   39,   58,   58,   58,   58,   58,
-       58,   58,   58,   58,   58,   58,    2,    5,   60,   58,
-       31,   40,   58,   58,   58,   58,   58,   58,   58,   58,
+        0,    0,    0,    0,   66,   64,    6,    7,    7,   64,
+       59,   64,   64,   64,   61,   59,   59,   60,   60,   60,
+       60,   60,   60,   60,   60,   60,   60,   60,   60,   60,
+       60,   60,   60,   60,   60,   60,   60,    3,    4,    6,
+        7,    0,   63,   61,    5,    1,   62,   57,   58,   56,
+       60,   60,   60,   49,   60,   60,   39,   60,   60,   60,
+       60,   60,   60,   60,   60,   60,   60,   60,   60,   60,
+       60,   60,   60,   60,   60,   60,   40,   60,   60,   60,
+       60,   60,   60,   60,   60,   60,   60,   60,    2,    5,
+       62,   60,   32,   41,   60,   60,   60,   60,   60,   60,
 
-       58,   58,   58,   58,   58,   58,   58,   58,   58,   58,
-       58,   27,   58,   58,   44,   45,   58,   58,   58,   58,
-       25,   58,   58,   47,   58,   58,   58,   58,   58,   58,
-       58,   28,   58,   58,   58,   58,   17,   16,   58,   34,
-       58,   58,   58,   22,   58,   58,   36,   58,   58,   19,
-       32,   58,   58,   58,   58,   33,    8,   58,   58,   52,
-       58,   58,   58,   11,    9,   58,   46,   58,   58,   58,
-       58,   53,   29,   49,   58,   30,   58,   51,   37,   58,
-       58,   58,   15,   58,   58,   23,   10,   14,   21,   58,
-       58,   50,   18,   58,   26,   58,   13,   24,   20,   58,
+       60,   60,   60,   60,   60,   60,   60,   60,   60,   60,
+       60,   60,   60,   60,   60,   27,   60,   60,   45,   46,
+       60,   60,   60,   60,   25,   60,   60,   48,   60,   60,
+       60,   60,   60,   60,   60,   60,   29,   60,   60,   60,
+       60,   60,   17,   16,   60,   35,   60,   60,   60,   22,
+       60,   60,   37,   60,   60,   19,   33,   60,   60,   60,
+       60,   34,    8,   60,   60,   54,   60,   60,   60,   11,
+        9,   60,   60,   47,   60,   60,   60,   60,   60,   55,
+       30,   50,   60,   31,   60,   52,   38,   60,   60,   60,
+       15,   60,   60,   23,   28,   10,   14,   60,   21,   60,
 
-       35,   58,   58,   58,   58,   12,   58,   58,   58,   58,
-       58,   58,   58,   58,   58,   58,   58,   58,   58,   58,
-       58,   58,   58,   58,   58,   41,   58,   58,   42,   58,
-       43,    0
+       60,   51,   18,   60,   26,   60,   13,   24,   20,   60,
+       60,   36,   60,   60,   53,   60,   60,   12,   60,   60,
+       60,   60,   60,   60,   60,   60,   60,   60,   60,   60,
+       60,   60,   60,   60,   60,   60,   60,   42,   60,   60,
+       43,   60,   44,    0
     } ;
 
 static const YY_CHAR yy_ec[256] =
@@ -461,67 +462,69 @@ static const YY_CHAR yy_meta[69] =
         3,    3,    3,    3,    3,    3,    3,    3
     } ;
 
-static const flex_int16_t yy_base[237] =
+static const flex_int16_t yy_base[249] =
     {   0,
-        0,    0,  431,  430,  434,  455,  429,  455,  427,  424,
-      455,  412,   58,  417,   59,   57,  405,   50,   54,   50,
-       55,   47,   62,   49,   76,   48,   60,    0,   67,  105,
-       81,   67,  105,  110,   67,   96,  104,  455,  374,  284,
-      455,  236,  455,   76,    0,  455,  178,  455,  455,  455,
-        0,  100,  112,  114,  111,    0,  118,  109,  115,  135,
-      116,  132,  140,  122,  120,  137,  143,  140,  151,  161,
-      155,  153,  144,  155,    0,  166,  159,  187,  157,  175,
-      164,  181,  164,  182,  176,  189,  455,    0,  171,  186,
-        0,    0,  192,  190,  198,  199,  214,  211,  214,  202,
+        0,    0,  379,  374,  320,  491,  300,  491,  235,  188,
+      491,  178,   58,  180,   59,   57,  158,   50,   54,   50,
+       65,   48,   94,   43,   72,   60,   60,    0,   67,  104,
+       93,   83,  109,  108,   99,  115,  110,  491,  133,  141,
+      491,  123,  491,   86,    0,  491,   91,  491,  491,  491,
+        0,  104,  116,  119,  116,  120,    0,  133,  137,  133,
+      127,  140,  141,  160,  153,  151,  150,  151,  152,  149,
+      156,  181,  164,  164,  155,  166,    0,  177,  174,  185,
+      175,  201,  195,  207,  192,  206,  202,  210,  491,    0,
+       85,  199,    0,    0,  209,  210,  203,  209,  213,  228,
 
-      217,  201,  210,  205,  227,  217,  213,  222,  219,  231,
-      233,  225,  233,  241,    0,    0,  246,  240,  248,  246,
-        0,  235,  240,    0,  251,  260,  266,  248,  252,  251,
-      258,    0,  265,  260,  262,  264,    0,    0,  263,    0,
-      285,  282,  270,    0,  272,  278,    0,  273,  281,    0,
-        0,  282,  285,  302,  303,    0,    0,  299,  305,    0,
-      296,  306,  312,    0,    0,  299,    0,  315,  316,  318,
-      316,    0,    0,    0,  319,    0,  309,    0,    0,  330,
-      313,  332,  319,  334,  323,    0,    0,    0,    0,  103,
-      326,    0,    0,  342,    0,  101,    0,    0,    0,  334,
+      226,  227,  230,  221,  237,  223,  235,  230,  249,  238,
+      233,  243,  240,  255,  256,  247,  250,  257,    0,    0,
+      262,  257,  265,  262,    0,  252,  260,    0,  260,  276,
+      282,  264,  271,  271,  280,  285,    0,  292,  283,  284,
+      286,  288,    0,    0,  299,    0,  311,  308,  295,    0,
+      301,  304,    0,  297,  304,    0,    0,  303,  306,  317,
+      323,    0,    0,  321,  327,    0,  314,  330,  331,    0,
+        0,  321,  322,    0,  345,  342,  348,  349,  346,    0,
+        0,    0,  350,    0,  340,    0,    0,  362,  345,  365,
+      351,  366,  354,    0,    0,    0,    0,  361,    0,   45,
 
-        0,  339,  352,  351,  344,    0,  352,  343,  346,  363,
-      350,  352,  370,  363,  364,  368,  365,  378,  368,  373,
-      372,  376,  376,  386,  387,    0,  393,  386,    0,  382,
-        0,  455,  445,  448,   81,  451
+      361,    0,    0,  375,    0,   41,    0,    0,    0,  377,
+      372,    0,  373,  384,    0,  383,  377,    0,  385,  377,
+      381,  397,  385,  386,  400,  395,  396,  400,  400,  412,
+      404,  407,  407,  408,  410,  420,  423,    0,  429,  422,
+        0,  418,    0,  491,  481,  484,   75,  487
     } ;
 
-static const flex_int16_t yy_def[237] =
+static const flex_int16_t yy_def[249] =
     {   0,
-      232,    1,  233,  233,  232,  232,  232,  232,  232,  234,
-      232,  232,  232,  232,  232,  232,  232,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  232,  232,  232,
-      232,  234,  232,  232,  236,  232,  232,  232,  232,  232,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  232,  236,  232,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
+      244,    1,  245,  245,  244,  244,  244,  244,  244,  246,
+      244,  244,  244,  244,  244,  244,  244,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  244,  244,  244,
+      244,  246,  244,  244,  248,  244,  244,  244,  244,  244,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  244,  248,
+      244,  247,  247,  247,  247,  247,  247,  247,  247,  247,
 
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
 
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,  235,  235,  235,  235,  235,  235,  235,  235,  235,
-      235,    0,  232,  232,  232,  232
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,  247,  247,  247,  247,  247,  247,  247,
+      247,  247,  247,    0,  244,  244,  244,  244
     } ;
 
-static const flex_int16_t yy_nxt[524] =
+static const flex_int16_t yy_nxt[560] =
     {   0,
         6,    7,    8,    9,   10,   11,   11,   11,   12,   11,
        13,   11,   14,   15,   11,   16,   11,   17,   18,   19,
@@ -530,60 +533,63 @@ static const flex_int16_t yy_nxt[524] =
        37,   28,   28,    6,   18,   19,   20,   21,   22,   23,
        24,   25,   26,   27,   28,   29,   30,   28,   31,   28,
        32,   33,   34,   35,   36,   37,   28,   28,   45,   52,
-       47,   44,   44,   48,   49,   57,   55,   60,   62,   70,
-       64,   53,   58,   51,   67,   59,   54,   47,   63,   44,
-       61,   65,   71,   72,   68,   52,   56,   66,   69,   77,
+       47,   44,   44,   48,   49,   58,   55,   51,   69,   64,
+       56,   53,   59,   61,  214,   60,   54,   62,  211,   65,
+       70,   72,   73,   74,   71,   52,   57,   47,   91,   44,
 
-       84,   57,   55,   60,   62,   70,   64,   53,   58,   67,
-       59,   54,   75,   63,   85,   61,   76,   65,   71,   72,
-       68,   56,   66,   73,   69,   77,   84,   78,   82,   86,
-       79,   74,   90,   91,   92,   93,   94,   97,   75,   95,
-       85,   76,   80,   81,  203,   83,  200,   96,  100,   73,
-      101,  104,  105,   78,   82,   86,   79,   74,   90,   91,
-       92,   93,   94,   97,   98,   95,  102,   80,   81,  106,
-       83,   99,   96,  103,  100,  107,  101,  104,  105,  108,
-      109,  113,  110,  114,   89,  115,  116,  117,  118,  122,
-       98,   89,  102,  123,  124,  106,   99,  111,  112,  103,
+       63,   58,   55,   69,   91,   64,   56,   53,   59,   61,
+       60,   54,   66,   62,   65,   79,   70,   72,   73,   74,
+       71,   57,   75,   67,   77,   63,   84,   43,   78,   68,
+       76,   80,   86,   87,   81,   88,   92,   93,   66,   94,
+       95,   79,   40,   85,   96,   89,   82,   83,   75,   67,
+       77,   97,   84,   78,   68,  100,   76,   80,   86,   87,
+       81,   88,   92,   93,  101,   94,   95,   98,   85,  102,
+       96,   82,   83,  104,   50,   99,  103,   97,  105,  106,
+      108,  100,  109,  110,  111,  113,  107,   46,  112,  101,
+      117,   44,   43,   98,  118,  102,  119,  120,  121,  104,
 
-      125,  107,  126,  127,  108,  128,  109,  113,  110,  114,
-      115,  129,  116,  117,  118,  122,  119,  120,  131,  123,
-      124,  130,  111,  112,  121,  132,  125,  126,  133,  127,
-      134,  128,  135,  136,  137,  138,  139,  129,  140,  141,
-       43,  142,  119,  120,  131,  143,  130,  144,  146,  121,
-      132,  145,  147,  148,  133,  149,  134,  150,  135,  136,
-      137,  138,  139,  140,  151,  141,  142,  152,  153,  154,
-      155,  143,  156,  144,  146,  157,  145,  158,  147,  148,
-      159,  149,  160,  150,  161,   40,  162,  163,  164,  165,
-      151,  166,  170,  152,  153,  154,  155,  167,  156,  168,
+       99,  103,  114,  122,  105,  106,  108,  126,  109,  110,
+      111,  113,  107,  112,  123,  124,  117,  115,  116,  127,
+      118,  119,  125,  120,  121,  128,  129,  131,  114,  122,
+      130,  132,  133,  126,  134,  135,  136,   41,  137,  138,
+      123,  124,  115,  116,  139,  127,  140,  125,  141,  142,
+      143,  128,  129,  131,  144,  130,  145,  132,  133,  134,
+      146,  135,  136,  137,  147,  138,  148,  149,  150,  152,
+      139,  151,  140,  153,  141,  142,  143,  154,  155,  156,
+      144,  157,  145,  158,  159,  146,  160,  161,  162,  165,
+      147,  148,  163,  149,  150,  152,  151,  164,  166,  153,
 
-      157,  169,  158,  171,  172,  174,  159,  173,  160,  175,
-      161,  162,  163,  164,  176,  165,  177,  166,  170,  178,
-      179,  180,  167,  181,  168,  182,  169,  183,  185,  171,
-      172,  174,  173,  184,  186,  175,  187,  188,  189,  176,
-      190,  177,  191,  192,  178,  179,  193,  180,  194,  181,
-      195,  182,  196,  183,  185,  197,  198,  201,  184,  199,
-      186,  187,  202,  188,  189,  204,  190,  206,  191,  192,
-      205,  193,  207,  208,  194,  195,  209,  210,  196,  211,
-      197,  212,  198,  201,  199,  213,   87,  214,  202,  215,
-      216,  204,  217,  206,  218,  205,  219,  220,  207,  208,
+      167,   40,  168,  154,  155,  156,  169,  157,  170,  158,
+      159,  171,  160,  161,  162,  165,  172,  163,  173,  244,
+      174,  175,  164,  176,  166,  177,  167,  168,  178,  179,
+      180,  169,  181,  170,  182,  183,  188,  171,  184,  185,
+      186,  187,  172,  189,  173,  174,  175,  190,  176,  191,
+      177,  192,  193,  194,  178,  179,  180,  181,  195,  196,
+      182,  183,  188,  184,  185,  186,  187,  197,  198,  189,
+      199,  200,  201,  190,  202,  191,  192,  203,  193,  194,
+      204,   39,  205,  195,  196,  206,   39,  207,  208,  244,
+      209,  210,  212,  197,  198,  213,  199,  200,  201,  215,
 
-      221,  222,  209,  210,  211,  223,  212,  224,  225,  226,
-      227,  213,  214,  228,  215,  229,  216,  230,  217,  231,
-      218,   50,  219,  220,   46,   44,  221,  222,   43,   41,
-       40,  223,  224,  232,  225,  226,  227,   39,   39,  228,
-      232,  229,  232,  230,  231,   38,   38,   38,   42,   42,
-       42,   88,  232,   88,    5,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
+      202,  218,  203,  216,  219,  220,  204,  205,  217,  221,
+      222,  206,  207,  223,  208,  209,  224,  210,  212,  225,
+      228,  213,  226,  227,  229,  215,  230,  218,  231,  216,
+      219,  220,  232,  217,  233,  221,  222,  234,  223,  235,
+      237,  224,  236,  238,  239,  225,  228,  226,  227,  240,
+      229,  241,  230,  242,  231,  243,  244,  244,  232,  244,
+      233,  244,  244,  234,  244,  235,  237,  236,  244,  238,
+      239,  244,  244,  244,  244,  240,  244,  241,  244,  242,
+      243,   38,   38,   38,   42,   42,   42,   90,  244,   90,
+        5,  244,  244,  244,  244,  244,  244,  244,  244,  244,
 
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244
     } ;
 
-static const flex_int16_t yy_chk[524] =
+static const flex_int16_t yy_chk[560] =
     {   0,
         1,    1,    1,    1,    1,    1,    1,    1,    1,    1,
         1,    1,    1,    1,    1,    1,    1,    1,    1,    1,
@@ -592,57 +598,60 @@ static const flex_int16_t yy_chk[524] =
         1,    1,    1,    1,    1,    1,    1,    1,    1,    1,
         1,    1,    1,    1,    1,    1,    1,    1,    1,    1,
         1,    1,    1,    1,    1,    1,    1,    1,   13,   18,
-       15,   13,   15,   16,   16,   20,   19,   21,   22,   26,
-       23,   18,   20,  235,   24,   20,   18,   44,   22,   44,
-       21,   23,   27,   29,   25,   18,   19,   23,   25,   32,
+       15,   13,   15,   16,   16,   20,   19,  247,   24,   22,
+       19,   18,   20,   21,  206,   20,   18,   21,  200,   22,
+       25,   26,   27,   29,   25,   18,   19,   44,   91,   44,
 
-       35,   20,   19,   21,   22,   26,   23,   18,   20,   24,
-       20,   18,   31,   22,   36,   21,   31,   23,   27,   29,
-       25,   19,   23,   30,   25,   32,   35,   33,   34,   37,
-       33,   30,   52,   53,   54,   55,   57,   59,   31,   58,
-       36,   31,   33,   33,  196,   34,  190,   58,   61,   30,
-       62,   64,   65,   33,   34,   37,   33,   30,   52,   53,
-       54,   55,   57,   59,   60,   58,   63,   33,   33,   66,
-       34,   60,   58,   63,   61,   67,   62,   64,   65,   68,
-       69,   71,   70,   72,   89,   73,   74,   76,   77,   79,
-       60,   47,   63,   80,   81,   66,   60,   70,   70,   63,
+       21,   20,   19,   24,   47,   22,   19,   18,   20,   21,
+       20,   18,   23,   21,   22,   32,   25,   26,   27,   29,
+       25,   19,   30,   23,   31,   21,   34,   42,   31,   23,
+       30,   33,   35,   36,   33,   37,   52,   53,   23,   54,
+       55,   32,   40,   34,   56,   39,   33,   33,   30,   23,
+       31,   58,   34,   31,   23,   60,   30,   33,   35,   36,
+       33,   37,   52,   53,   61,   54,   55,   59,   34,   62,
+       56,   33,   33,   63,   17,   59,   62,   58,   64,   65,
+       66,   60,   67,   68,   69,   71,   65,   14,   70,   61,
+       73,   12,   10,   59,   74,   62,   75,   76,   78,   63,
 
-       82,   67,   83,   84,   68,   85,   69,   71,   70,   72,
-       73,   86,   74,   76,   77,   79,   78,   78,   93,   80,
-       81,   90,   70,   70,   78,   94,   82,   83,   95,   84,
-       96,   85,   97,   98,   99,  100,  101,   86,  102,  103,
-       42,  104,   78,   78,   93,  105,   90,  106,  108,   78,
-       94,  107,  109,  110,   95,  111,   96,  112,   97,   98,
-       99,  100,  101,  102,  113,  103,  104,  114,  117,  118,
-      119,  105,  120,  106,  108,  122,  107,  123,  109,  110,
-      125,  111,  126,  112,  127,   40,  128,  129,  130,  131,
-      113,  133,  139,  114,  117,  118,  119,  134,  120,  135,
+       59,   62,   72,   79,   64,   65,   66,   81,   67,   68,
+       69,   71,   65,   70,   80,   80,   73,   72,   72,   82,
+       74,   75,   80,   76,   78,   83,   84,   86,   72,   79,
+       85,   87,   88,   81,   92,   95,   96,    9,   97,   98,
+       80,   80,   72,   72,   99,   82,  100,   80,  101,  102,
+      103,   83,   84,   86,  104,   85,  105,   87,   88,   92,
+      106,   95,   96,   97,  107,   98,  108,  109,  110,  112,
+       99,  111,  100,  113,  101,  102,  103,  114,  115,  116,
+      104,  117,  105,  118,  121,  106,  122,  123,  124,  129,
+      107,  108,  126,  109,  110,  112,  111,  127,  130,  113,
 
-      122,  136,  123,  141,  142,  145,  125,  143,  126,  146,
-      127,  128,  129,  130,  148,  131,  149,  133,  139,  152,
-      153,  154,  134,  155,  135,  158,  136,  159,  162,  141,
-      142,  145,  143,  161,  163,  146,  166,  168,  169,  148,
-      170,  149,  171,  175,  152,  153,  177,  154,  180,  155,
-      181,  158,  182,  159,  162,  183,  184,  191,  161,  185,
-      163,  166,  194,  168,  169,  200,  170,  202,  171,  175,
-      200,  177,  203,  204,  180,  181,  205,  207,  182,  208,
-      183,  209,  184,  191,  185,  210,   39,  211,  194,  212,
-      213,  200,  214,  202,  215,  200,  216,  217,  203,  204,
+      131,    7,  132,  114,  115,  116,  133,  117,  134,  118,
+      121,  135,  122,  123,  124,  129,  136,  126,  138,    5,
+      139,  140,  127,  141,  130,  142,  131,  132,  145,  147,
+      148,  133,  149,  134,  151,  152,  160,  135,  154,  155,
+      158,  159,  136,  161,  138,  139,  140,  164,  141,  165,
+      142,  167,  168,  169,  145,  147,  148,  149,  172,  173,
+      151,  152,  160,  154,  155,  158,  159,  175,  176,  161,
+      177,  178,  179,  164,  183,  165,  167,  185,  168,  169,
+      188,    4,  189,  172,  173,  190,    3,  191,  192,    0,
+      193,  198,  201,  175,  176,  204,  177,  178,  179,  210,
 
-      218,  219,  205,  207,  208,  220,  209,  221,  222,  223,
-      224,  210,  211,  225,  212,  227,  213,  228,  214,  230,
-      215,   17,  216,  217,   14,   12,  218,  219,   10,    9,
-        7,  220,  221,    5,  222,  223,  224,    4,    3,  225,
-        0,  227,    0,  228,  230,  233,  233,  233,  234,  234,
-      234,  236,    0,  236,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
+      183,  213,  185,  211,  214,  216,  188,  189,  211,  217,
+      219,  190,  191,  220,  192,  193,  221,  198,  201,  222,
+      225,  204,  223,  224,  226,  210,  227,  213,  228,  211,
+      214,  216,  229,  211,  230,  217,  219,  231,  220,  232,
+      234,  221,  233,  235,  236,  222,  225,  223,  224,  237,
+      226,  239,  227,  240,  228,  242,    0,    0,  229,    0,
+      230,    0,    0,  231,    0,  232,  234,  233,    0,  235,
+      236,    0,    0,    0,    0,  237,    0,  239,    0,  240,
+      242,  245,  245,  245,  246,  246,  246,  248,    0,  248,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
 
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232,  232,  232,  232,  232,  232,  232,  232,
-      232,  232,  232
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244,  244,
+      244,  244,  244,  244,  244,  244,  244,  244,  244
     } ;
 
 static yy_state_type yy_last_accepting_state;
@@ -670,6 +679,8 @@ char *yytext;
 #include "ast.h"
 #include "yacc.tab.h"
 #include <iostream>
+#include <cerrno>
+#include <climits>
 
 // automatically update location
 #define YY_USER_ACTION \
@@ -684,9 +695,9 @@ char *yytext;
         } \
     }
 
-#line 688 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 699 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
-#line 690 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 701 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
 #define INITIAL 0
 #define STATE_COMMENT 1
@@ -920,11 +931,11 @@ YY_DECL
 		}
 
 	{
-#line 46 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-
 #line 48 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+
+#line 50 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
     /* block comment */
-#line 928 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 939 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -951,13 +962,13 @@ yy_match:
 			while ( yy_chk[yy_base[yy_current_state] + yy_c] != yy_current_state )
 				{
 				yy_current_state = (int) yy_def[yy_current_state];
-				if ( yy_current_state >= 233 )
+				if ( yy_current_state >= 245 )
 					yy_c = yy_meta[yy_c];
 				}
 			yy_current_state = yy_nxt[yy_base[yy_current_state] + yy_c];
 			++yy_cp;
 			}
-		while ( yy_base[yy_current_state] != 455 );
+		while ( yy_base[yy_current_state] != 491 );
 
 yy_find_action:
 		yy_act = yy_accept[yy_current_state];
@@ -983,331 +994,353 @@ do_action:	/* This label is used only to access EOF actions. */
 
 case 1:
 YY_RULE_SETUP
-#line 49 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 51 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { BEGIN(STATE_COMMENT); }
 	YY_BREAK
 case 2:
 YY_RULE_SETUP
-#line 50 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 52 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { BEGIN(INITIAL); }
 	YY_BREAK
 case 3:
 /* rule 3 can match eol */
 YY_RULE_SETUP
-#line 51 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 53 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore the text of the comment */ }
 	YY_BREAK
 case 4:
 YY_RULE_SETUP
-#line 52 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 54 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore *'s that aren't part of */ }
 	YY_BREAK
 /* single line comment */
 case 5:
 YY_RULE_SETUP
-#line 54 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 56 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore single line comment */ }
 	YY_BREAK
 /* white space and new line */
 case 6:
 YY_RULE_SETUP
-#line 56 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 58 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore white space */ }
 	YY_BREAK
 case 7:
 /* rule 7 can match eol */
 YY_RULE_SETUP
-#line 57 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 59 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { /* ignore new line */ }
 	YY_BREAK
 /* keywords */
 case 8:
 YY_RULE_SETUP
-#line 59 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 61 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SHOW; }
 	YY_BREAK
 case 9:
 YY_RULE_SETUP
-#line 60 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 62 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_BEGIN; }
 	YY_BREAK
 case 10:
 YY_RULE_SETUP
-#line 61 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 63 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_COMMIT; }
 	YY_BREAK
 case 11:
 YY_RULE_SETUP
-#line 62 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 64 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_ABORT; }
 	YY_BREAK
 case 12:
 YY_RULE_SETUP
-#line 63 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 65 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TXN_ROLLBACK; }
 	YY_BREAK
 case 13:
 YY_RULE_SETUP
-#line 64 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 66 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TABLES; }
 	YY_BREAK
 case 14:
 YY_RULE_SETUP
-#line 65 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 67 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return CREATE; }
 	YY_BREAK
 case 15:
 YY_RULE_SETUP
-#line 66 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 68 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return TABLE; }
 	YY_BREAK
 case 16:
 YY_RULE_SETUP
-#line 67 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 69 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DROP; }
 	YY_BREAK
 case 17:
 YY_RULE_SETUP
-#line 68 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 70 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DESC; }
 	YY_BREAK
 case 18:
 YY_RULE_SETUP
-#line 69 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 71 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INSERT; }
 	YY_BREAK
 case 19:
 YY_RULE_SETUP
-#line 70 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 72 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INTO; }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
-#line 71 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 73 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return VALUES; }
 	YY_BREAK
 case 21:
 YY_RULE_SETUP
-#line 72 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 74 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return DELETE; }
 	YY_BREAK
 case 22:
 YY_RULE_SETUP
-#line 73 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 75 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return FROM; }
 	YY_BREAK
 case 23:
 YY_RULE_SETUP
-#line 74 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 76 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return WHERE; }
 	YY_BREAK
 case 24:
 YY_RULE_SETUP
-#line 75 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 77 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return UPDATE; }
 	YY_BREAK
 case 25:
 YY_RULE_SETUP
-#line 76 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 78 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SET; }
 	YY_BREAK
 case 26:
 YY_RULE_SETUP
-#line 77 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 79 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return SELECT; }
 	YY_BREAK
 case 27:
 YY_RULE_SETUP
-#line 78 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 80 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return INT; }
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
-#line 79 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return CHAR; }
+#line 81 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return BIGINT; }
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
-#line 80 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return FLOAT; }
+#line 82 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return CHAR; }
 	YY_BREAK
 case 30:
 YY_RULE_SETUP
-#line 81 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return INDEX; }
+#line 83 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return FLOAT; }
 	YY_BREAK
 case 31:
 YY_RULE_SETUP
-#line 82 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return AND; }
+#line 84 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return INDEX; }
 	YY_BREAK
 case 32:
 YY_RULE_SETUP
-#line 83 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{return JOIN;}
+#line 85 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return AND; }
 	YY_BREAK
 case 33:
 YY_RULE_SETUP
-#line 84 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return SEMI; }
+#line 86 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{return JOIN;}
 	YY_BREAK
 case 34:
 YY_RULE_SETUP
-#line 85 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return EXIT; }
+#line 87 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return SEMI; }
 	YY_BREAK
 case 35:
 YY_RULE_SETUP
-#line 86 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return EXPLAIN; }
+#line 88 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return EXIT; }
 	YY_BREAK
 case 36:
 YY_RULE_SETUP
-#line 87 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return HELP; }
+#line 89 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return EXPLAIN; }
 	YY_BREAK
 case 37:
 YY_RULE_SETUP
-#line 88 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return ORDER; }
+#line 90 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return HELP; }
 	YY_BREAK
 case 38:
 YY_RULE_SETUP
-#line 89 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{  return BY;  }
+#line 91 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return ORDER; }
 	YY_BREAK
 case 39:
 YY_RULE_SETUP
-#line 90 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return ON; }
+#line 92 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{  return BY;  }
 	YY_BREAK
 case 40:
 YY_RULE_SETUP
-#line 91 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return ASC; }
+#line 93 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return ON; }
 	YY_BREAK
 case 41:
 YY_RULE_SETUP
-#line 92 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return ENABLE_NESTLOOP; }
+#line 94 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return ASC; }
 	YY_BREAK
 case 42:
 YY_RULE_SETUP
-#line 93 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return ENABLE_SORTMERGE; }
+#line 95 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return ENABLE_NESTLOOP; }
 	YY_BREAK
 case 43:
 YY_RULE_SETUP
-#line 94 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return STATIC_CHECKPOINT; }
+#line 96 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return ENABLE_SORTMERGE; }
 	YY_BREAK
 case 44:
 YY_RULE_SETUP
-#line 95 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return MAX; }
+#line 97 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return STATIC_CHECKPOINT; }
 	YY_BREAK
 case 45:
 YY_RULE_SETUP
-#line 96 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return MIN; }
+#line 98 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return MAX; }
 	YY_BREAK
 case 46:
 YY_RULE_SETUP
-#line 97 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return COUNT; }
+#line 99 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return MIN; }
 	YY_BREAK
 case 47:
 YY_RULE_SETUP
-#line 98 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return SUM; }
+#line 100 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return COUNT; }
 	YY_BREAK
 case 48:
 YY_RULE_SETUP
-#line 99 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return AS; }
+#line 101 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return SUM; }
 	YY_BREAK
 case 49:
 YY_RULE_SETUP
-#line 100 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return GROUP; }
+#line 102 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return AS; }
 	YY_BREAK
 case 50:
 YY_RULE_SETUP
-#line 101 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return HAVING; }
+#line 103 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return GROUP; }
 	YY_BREAK
 case 51:
 YY_RULE_SETUP
-#line 102 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return LIMIT; }
+#line 104 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return HAVING; }
 	YY_BREAK
 case 52:
 YY_RULE_SETUP
-#line 103 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ 
-    yylval->sv_bool = true;
-    return VALUE_BOOL; 
-}
+#line 105 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return LIMIT; }
 	YY_BREAK
 case 53:
 YY_RULE_SETUP
+#line 106 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return DATETIME; }
+	YY_BREAK
+case 54:
+YY_RULE_SETUP
 #line 107 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{
+    yylval->sv_bool = true;
+    return VALUE_BOOL;
+}
+	YY_BREAK
+case 55:
+YY_RULE_SETUP
+#line 111 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_bool = false;
     return VALUE_BOOL;
 }
 	YY_BREAK
 /* operators */
-case 54:
-YY_RULE_SETUP
-#line 112 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return GEQ; }
-	YY_BREAK
-case 55:
-YY_RULE_SETUP
-#line 113 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return LEQ; }
-	YY_BREAK
 case 56:
 YY_RULE_SETUP
-#line 114 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-{ return NEQ; }
+#line 116 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return GEQ; }
 	YY_BREAK
 case 57:
 YY_RULE_SETUP
-#line 115 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 117 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return LEQ; }
+	YY_BREAK
+case 58:
+YY_RULE_SETUP
+#line 118 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+{ return NEQ; }
+	YY_BREAK
+case 59:
+YY_RULE_SETUP
+#line 119 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return yytext[0]; }
 	YY_BREAK
 /* id */
-case 58:
+case 60:
 YY_RULE_SETUP
-#line 117 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 121 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_str = yytext;
     return IDENTIFIER;
 }
 	YY_BREAK
 /* literals */
-case 59:
+case 61:
 YY_RULE_SETUP
-#line 122 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 126 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
-    yylval->sv_int = atoi(yytext);
+    errno = 0;
+    long long val = strtoll(yytext, nullptr, 10);
+    if (errno == ERANGE || val > INT64_MAX || val < INT64_MIN) {
+        // 溢出：设为 int64_t 最大值/最小值标记，后续按 bigint 处理
+        yylval->sv_bigint = (yytext[0] == '-') ? INT64_MIN : INT64_MAX;
+        yylval->sv_int = 0;
+        return VALUE_BIGINT;
+    }
+    if (val > INT32_MAX || val < INT32_MIN) {
+        yylval->sv_bigint = (int64_t)val;
+        return VALUE_BIGINT;
+    }
+    yylval->sv_int = (int)val;
     return VALUE_INT;
 }
 	YY_BREAK
-case 60:
+case 62:
 YY_RULE_SETUP
-#line 126 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 142 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_float = atof(yytext);
     return VALUE_FLOAT;
 }
 	YY_BREAK
-case 61:
-/* rule 61 can match eol */
+case 63:
+/* rule 63 can match eol */
 YY_RULE_SETUP
-#line 130 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 146 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 {
     yylval->sv_str = std::string(yytext + 1, strlen(yytext) - 2);
     return VALUE_STRING;
@@ -1316,21 +1349,21 @@ YY_RULE_SETUP
 /* EOF */
 case YY_STATE_EOF(INITIAL):
 case YY_STATE_EOF(STATE_COMMENT):
-#line 135 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 151 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { return T_EOF; }
 	YY_BREAK
 /* unexpected char */
-case 62:
+case 64:
 YY_RULE_SETUP
-#line 137 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 153 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 { std::cerr << "Lexer Error: unexpected character " << yytext[0] << std::endl; }
 	YY_BREAK
-case 63:
+case 65:
 YY_RULE_SETUP
-#line 138 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
+#line 154 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 ECHO;
 	YY_BREAK
-#line 1334 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
+#line 1367 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.yy.cpp"
 
 	case YY_END_OF_BUFFER:
 		{
@@ -1625,7 +1658,7 @@ static int yy_get_next_buffer (void)
 		while ( yy_chk[yy_base[yy_current_state] + yy_c] != yy_current_state )
 			{
 			yy_current_state = (int) yy_def[yy_current_state];
-			if ( yy_current_state >= 233 )
+			if ( yy_current_state >= 245 )
 				yy_c = yy_meta[yy_c];
 			}
 		yy_current_state = yy_nxt[yy_base[yy_current_state] + yy_c];
@@ -1653,11 +1686,11 @@ static int yy_get_next_buffer (void)
 	while ( yy_chk[yy_base[yy_current_state] + yy_c] != yy_current_state )
 		{
 		yy_current_state = (int) yy_def[yy_current_state];
-		if ( yy_current_state >= 233 )
+		if ( yy_current_state >= 245 )
 			yy_c = yy_meta[yy_c];
 		}
 	yy_current_state = yy_nxt[yy_base[yy_current_state] + yy_c];
-	yy_is_jam = (yy_current_state == 232);
+	yy_is_jam = (yy_current_state == 244);
 
 		return yy_is_jam ? 0 : yy_current_state;
 }
@@ -2296,6 +2329,5 @@ void yyfree (void * ptr )
 
 #define YYTABLES_NAME "yytables"
 
-#line 138 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
-
+#line 154 "/mnt/d/Python_Project/RMDB_proj/rmdb/src/parser/lex.l"
 

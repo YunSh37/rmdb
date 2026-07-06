@@ -90,10 +90,22 @@ class UpdateExecutor : public AbstractExecutor {
                     throw ColumnNotFoundError(clause.lhs.col_name);
                 }
                 if (col_it->type != clause.rhs.type) {
-                    // 允许 INT→FLOAT 隐式转换（例如 SET score = 90，score 为 FLOAT）
-                    if (col_it->type == TYPE_FLOAT && clause.rhs.type == TYPE_INT) {
+                    // 允许 INT→BIGINT 隐式转换
+                    if (col_it->type == TYPE_BIGINT && clause.rhs.type == TYPE_INT) {
+                        clause.rhs.type = TYPE_BIGINT;
+                        clause.rhs.bigint_val = static_cast<int64_t>(clause.rhs.int_val);
+                    } else if (col_it->type == TYPE_INT && clause.rhs.type == TYPE_BIGINT) {
+                        throw IncompatibleTypeError(coltype2str(col_it->type), coltype2str(clause.rhs.type));
+                    } else if (col_it->type == TYPE_FLOAT && clause.rhs.type == TYPE_INT) {
+                        // 允许 INT→FLOAT 隐式转换（例如 SET score = 90，score 为 FLOAT）
                         clause.rhs.type = TYPE_FLOAT;
                         clause.rhs.float_val = static_cast<float>(clause.rhs.int_val);
+                    } else if (col_it->type == TYPE_FLOAT && clause.rhs.type == TYPE_BIGINT) {
+                        clause.rhs.type = TYPE_FLOAT;
+                        clause.rhs.float_val = static_cast<float>(clause.rhs.bigint_val);
+                    } else if (col_it->type == TYPE_DATETIME && clause.rhs.type == TYPE_STRING) {
+                        // 字符串→DATETIME 转换，解析并验证 'YYYY-MM-DD HH:MM:SS'
+                        clause.rhs.set_datetime(datetime_parse(clause.rhs.str_val));
                     } else {
                         throw IncompatibleTypeError(coltype2str(col_it->type), coltype2str(clause.rhs.type));
                     }

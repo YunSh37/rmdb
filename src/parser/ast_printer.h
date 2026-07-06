@@ -43,9 +43,11 @@ private:
 
     static std::string type2str(SvType type) {
         static std::map<SvType, std::string> m{
-                {SV_TYPE_INT,    "INT"},
-                {SV_TYPE_FLOAT,  "FLOAT"},
-                {SV_TYPE_STRING, "STRING"},
+                {SV_TYPE_INT,      "INT"},
+                {SV_TYPE_FLOAT,    "FLOAT"},
+                {SV_TYPE_STRING,   "STRING"},
+                {SV_TYPE_BIGINT,   "BIGINT"},
+                {SV_TYPE_DATETIME, "DATETIME"},
         };
         return m.at(type);
     }
@@ -115,6 +117,12 @@ private:
             print_val(x->len, offset);
         } else if (auto x = std::dynamic_pointer_cast<IntLit>(node)) {
             std::cout << "INT_LIT\n";
+            print_val(x->val, offset);
+        } else if (auto x = std::dynamic_pointer_cast<BigIntLit>(node)) {
+            std::cout << "BIGINT_LIT\n";
+            print_val(x->val, offset);
+        } else if (auto x = std::dynamic_pointer_cast<DatetimeLit>(node)) {
+            std::cout << "DATETIME_LIT\n";
             print_val(x->val, offset);
         } else if (auto x = std::dynamic_pointer_cast<FloatLit>(node)) {
             std::cout << "FLOAT_LIT\n";

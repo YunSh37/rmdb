@@ -22,13 +22,14 @@ using namespace ast;
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN MAX MIN COUNT SUM AS GROUP HAVING LIMIT SEMI STATIC_CHECKPOINT
+WHERE UPDATE SET SELECT INT CHAR FLOAT BIGINT DATETIME INDEX AND JOIN ON EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE EXPLAIN MAX MIN COUNT SUM AS GROUP HAVING LIMIT SEMI STATIC_CHECKPOINT
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
 // type-specific tokens
 %token <sv_str> IDENTIFIER VALUE_STRING
 %token <sv_int> VALUE_INT
+%token <sv_bigint> VALUE_BIGINT
 %token <sv_float> VALUE_FLOAT
 %token <sv_bool> VALUE_BOOL
 
@@ -242,6 +243,10 @@ type:
     {
         $$ = std::make_shared<TypeLen>(SV_TYPE_INT, sizeof(int));
     }
+    |   BIGINT
+    {
+        $$ = std::make_shared<TypeLen>(SV_TYPE_BIGINT, sizeof(int64_t));
+    }
     |   CHAR '(' VALUE_INT ')'
     {
         $$ = std::make_shared<TypeLen>(SV_TYPE_STRING, $3);
@@ -249,6 +254,10 @@ type:
     |   FLOAT
     {
         $$ = std::make_shared<TypeLen>(SV_TYPE_FLOAT, sizeof(float));
+    }
+    |   DATETIME
+    {
+        $$ = std::make_shared<TypeLen>(SV_TYPE_DATETIME, sizeof(int64_t));
     }
     ;
 
@@ -267,6 +276,10 @@ value:
         VALUE_INT
     {
         $$ = std::make_shared<IntLit>($1);
+    }
+    |   VALUE_BIGINT
+    {
+        $$ = std::make_shared<BigIntLit>($1);
     }
     |   VALUE_FLOAT
     {

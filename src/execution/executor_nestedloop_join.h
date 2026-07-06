@@ -95,6 +95,10 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 int lhs_val = *(int*)(lhs_rec->data + lhs_meta->offset);
                 int rhs_val = *(int*)(rhs_rec->data + rhs_meta->offset);
                 cond_result = compare_val<int>(lhs_val, rhs_val, cond.op);
+            } else if (lhs_meta->type == TYPE_BIGINT || lhs_meta->type == TYPE_DATETIME) {
+                int64_t lhs_val = *(int64_t*)(lhs_rec->data + lhs_meta->offset);
+                int64_t rhs_val = *(int64_t*)(rhs_rec->data + rhs_meta->offset);
+                cond_result = compare_val<int64_t>(lhs_val, rhs_val, cond.op);
             } else if (lhs_meta->type == TYPE_FLOAT) {
                 float lhs_val = *(float*)(lhs_rec->data + lhs_meta->offset);
                 float rhs_val = *(float*)(rhs_rec->data + rhs_meta->offset);
