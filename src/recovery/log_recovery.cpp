@@ -323,22 +323,14 @@ void RecoveryManager::redo() {
                 break;
             }
             case LogType::INDEX_PAGE_MODIFY: {
-                IndexPageModifyLogRecord rec;
-                rec.deserialize(log_data_.data() + offset);
-                int fd = get_file_fd_safe(rec.index_name_);
-                if (fd < 0) break;
-                PageId pid{fd, rec.page_no_};
-                if (dpt_.find(pid) == dpt_.end()) break;
-                ensure_page_exists(rec.index_name_, rec.page_no_);
-                Page* page = buffer_pool_manager_->fetch_page(pid);
-                if (page == nullptr) break;
-                if (page->get_page_lsn() < lsn) {
-                    memcpy(page->get_data(), rec.after_image_, PAGE_SIZE);
-                    page->set_page_lsn(lsn);
-                    buffer_pool_manager_->mark_dirty(page);
-                    redo_count++;
-                }
-                buffer_pool_manager_->unpin_page(pid, true);
+                // ============================================================
+                // 跳过索引页物理日志的 REDO
+                // 原因：恢复完成后 rebuild_all_indexes() 会从数据页完整重建
+                //       所有索引。若在此处 fetch 索引页到缓冲池，后续
+                //       rebuild_all_indexes 销毁旧索引文件并创建新文件时，
+                //       OS 可能复用相同 fd，导致缓冲池返回旧页缓存（脏读）。
+                // 仅保留 analyze 阶段的 ATT/DPT 更新用于事务状态跟踪。
+                // ============================================================
                 break;
             }
             default: break;
@@ -400,22 +392,14 @@ void RecoveryManager::undo() {
                 break;
             }
             case LogType::INDEX_PAGE_MODIFY: {
-                auto* r = dynamic_cast<IndexPageModifyLogRecord*>(record.get());
-                if (r) {
-                    int fd = get_file_fd_safe(r->index_name_);
-                    if (fd >= 0) {
-                        ensure_page_exists(r->index_name_, r->page_no_);
-                        PageId pid{fd, r->page_no_};
-                        Page* page = buffer_pool_manager_->fetch_page(pid);
-                        if (page != nullptr) {
-                            // 应用before_image回滚到修改前的状态
-                            memcpy(page->get_data(), r->before_image_, PAGE_SIZE);
-                            buffer_pool_manager_->mark_dirty(page);
-                            buffer_pool_manager_->unpin_page(pid, true);
-                            undo_count++;
-                        }
-                    }
-                }
+                // ============================================================
+                // 跳过索引页物理日志的 UNDO
+                // 原因：恢复完成后 rebuild_all_indexes() 会从数据页完整重建
+                //       所有索引，索引页的 UNDO 操作是冗余的。数据页的 UNDO
+                //       (INSERT/DELETE/UPDATE) 已保证数据正确，重建索引时
+                //       自动反映正确的数据状态。
+                // 仅需跟随 prev_lsn 链继续回滚（在 switch 外部处理）。
+                // ============================================================
                 break;
             }
             default: break;
