@@ -235,15 +235,19 @@ public:
         log_tid_ = INVALID_TXN_ID;
         prev_lsn_ = INVALID_LSN;
         table_name_ = nullptr;
+        xmax_ = INT32_MAX;
     }
-    DeleteLogRecord(txn_id_t txn_id, std::string table_name, RmRecord& deleted_record, Rid& rid)
+    DeleteLogRecord(txn_id_t txn_id, std::string table_name, RmRecord& deleted_record,
+                    Rid& rid, timestamp_t xmax)
         : DeleteLogRecord() {
         log_tid_ = txn_id;
         deleted_record_ = deleted_record;
         rid_ = rid;
+        xmax_ = xmax;
         log_tot_len_ += sizeof(int);                 // record size字段
         log_tot_len_ += deleted_record_.size;        // 实际记录数据（含MVCC头）
         log_tot_len_ += sizeof(Rid);                 // rid
+        log_tot_len_ += sizeof(timestamp_t);         // xmax（软删除时间戳）
         table_name_size_ = table_name.length();
         table_name_ = new char[table_name_size_ + 1];
         memcpy(table_name_, table_name.c_str(), table_name_size_);
@@ -267,6 +271,8 @@ public:
         offset += deleted_record_.size;
         memcpy(dest + offset, &rid_, sizeof(Rid));
         offset += sizeof(Rid);
+        memcpy(dest + offset, &xmax_, sizeof(timestamp_t));
+        offset += sizeof(timestamp_t);
         memcpy(dest + offset, &table_name_size_, sizeof(size_t));
         offset += sizeof(size_t);
         memcpy(dest + offset, table_name_, table_name_size_);
@@ -278,6 +284,8 @@ public:
         int offset = OFFSET_LOG_DATA + deleted_record_.size + sizeof(int);
         rid_ = *reinterpret_cast<const Rid*>(src + offset);
         offset += sizeof(Rid);
+        xmax_ = *reinterpret_cast<const timestamp_t*>(src + offset);
+        offset += sizeof(timestamp_t);
         table_name_size_ = *reinterpret_cast<const size_t*>(src + offset);
         offset += sizeof(size_t);
         table_name_ = new char[table_name_size_ + 1];
@@ -296,6 +304,7 @@ public:
     Rid rid_;                   // 被删除记录的位置
     char* table_name_;          // 表名称
     size_t table_name_size_;    // 表名称的大小
+    timestamp_t xmax_;          // 软删除时设置的xmax值（即事务start_ts，用于REDO恢复）
 };
 
 /** update操作的日志记录（含新旧记录用于UNDO/REDO） */

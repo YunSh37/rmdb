@@ -79,7 +79,9 @@ class DeleteExecutor : public AbstractExecutor {
 
             // WAL日志：记录DELETE操作（用于故障恢复REDO/UNDO）
             if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
-                DeleteLogRecord* log_rec = new DeleteLogRecord(context_->txn_->get_transaction_id(), tab_name_, *rec, rid);
+                DeleteLogRecord* log_rec = new DeleteLogRecord(
+                    context_->txn_->get_transaction_id(), tab_name_, *rec, rid,
+                    context_->txn_->get_start_ts());
                 log_rec->prev_lsn_ = context_->txn_->get_prev_lsn();
                 lsn_t lsn = context_->log_mgr_->add_log_to_buffer(log_rec);
                 context_->txn_->set_prev_lsn(lsn);

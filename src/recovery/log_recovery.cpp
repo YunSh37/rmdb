@@ -296,6 +296,12 @@ void RecoveryManager::redo() {
                 if (ph.page->get_page_lsn() < lsn) {
                     memcpy(ph.get_slot(rec.rid_.slot_no), rec.deleted_record_.data,
                            rec.deleted_record_.size);
+                    // 恢复软删除状态：deleted_record_存储的是删除前记录(xmax=INT32_MAX)
+                    // 需要将xmax设置为事务时间戳，保持已删除状态
+                    char* slot = ph.get_slot(rec.rid_.slot_no);
+                    int user_size = fh->get_user_record_size();
+                    MvccHeader* hdr = reinterpret_cast<MvccHeader*>(slot + user_size);
+                    hdr->xmax_ = rec.xmax_;
                     ph.page->set_page_lsn(lsn);
                     buffer_pool_manager_->mark_dirty(ph.page);
                     redo_count++;
