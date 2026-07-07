@@ -402,10 +402,15 @@ void SmManager::rebuild_all_indexes() {
     printf("[Recovery] 重建 %zu 个索引...\n", all_indexes.size());
 
     // 2. 销毁旧索引文件并清理元数据
+    //    IMPORTANT: 先丢弃缓冲池中属于该索引文件的所有缓存页，
+    //    防止 OS 在 destroy_file+create_index 时复用同一 fd 而导致
+    //    缓冲池返回旧索引页（redo阶段的INDEX_PAGE_MODIFY可能已缓存）
     for (auto& info : all_indexes) {
         std::string ix_name = ix_manager_->get_index_name(info.tab_name, info.col_names);
         if (ihs_.count(ix_name)) {
-            ix_manager_->close_index(ihs_[ix_name].get());
+            auto* ih = ihs_[ix_name].get();
+            get_bpm()->discard_all_pages(ih->get_fd());   // 丢弃缓冲池中该fd的所有缓存页
+            ix_manager_->close_index(ih);
             ihs_.erase(ix_name);
         }
         if (disk_manager_->is_file(ix_name)) {
