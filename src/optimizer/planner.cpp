@@ -58,9 +58,6 @@ bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_c
     // ===== 策略2：范围条件匹配索引（仅 enable_range=true 时启用）=====
     // 该策略用于 SELECT 的间隙锁（题目十）：IndexScan 注册谓词范围锁
     // DELETE/UPDATE 不需要此策略，使用 SeqScan 即可
-    // IMPORTANT: 仅匹配单列索引，不匹配复合索引。
-    //   复合索引在部分匹配时涉及复杂的键构造，且 IndexScan 对此场景的
-    //   范围扫描逻辑未充分验证（题目十一 crash_recovery_index_test 回归）。
     if (!enable_range) {
         index_col_names.clear();
         return false;
@@ -84,29 +81,41 @@ bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_c
         return false;
     }
 
-    // 寻找最佳匹配的单列索引：
-    //   仅匹配单列索引（col_num == 1 且列名在过滤条件中）
-    //   避免复合索引部分匹配导致的 题目十一 回归
+    // 寻找最佳匹配索引：
+    //   1. 索引第一列必须在 filter_col_set 中（B+树最左前缀）
+    //   2. filter_col_set 的所有列必须属于该索引（避免扫描范围外的列）
+    //   3. 优先选择列数最少的索引
     IndexMeta* best_index = nullptr;
     for (auto& index : tab.indexes) {
-        if (index.col_num != 1) continue;  // 仅匹配单列索引
         if (index.col_num == 0) continue;
 
-        // 索引列必须在过滤条件中
+        // 约束1：索引第一列必须在过滤条件中
         if (filter_col_set.find(index.cols[0].name) == filter_col_set.end()) {
             continue;
         }
 
-        // 优先选择第一个匹配的（无需列数比较，都是单列）
-        if (best_index == nullptr) {
+        // 约束2：所有过滤列必须属于该索引
+        bool all_filters_in_index = true;
+        for (auto& fc : filter_col_set) {
+            bool found = false;
+            for (auto& ic : index.cols) {
+                if (ic.name == fc) { found = true; break; }
+            }
+            if (!found) { all_filters_in_index = false; break; }
+        }
+        if (!all_filters_in_index) continue;
+
+        // 约束3：优先选择列数较少的索引
+        if (best_index == nullptr || index.col_num < best_index->col_num) {
             best_index = &index;
-            break;
         }
     }
 
     if (best_index != nullptr) {
-        // 返回索引的列名列表（IndexScanExecutor 需要索引元数据）
-        index_col_names.push_back(best_index->cols[0].name);
+        // 返回索引的完整列名列表（IndexScanExecutor 需要完整的索引元数据）
+        for (auto& col : best_index->cols) {
+            index_col_names.push_back(col.name);
+        }
         return true;
     }
 
