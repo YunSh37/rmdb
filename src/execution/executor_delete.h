@@ -78,6 +78,7 @@ class DeleteExecutor : public AbstractExecutor {
             auto rec = fh_->get_record(rid, context_);
 
             // WAL日志：记录DELETE操作（用于故障恢复REDO/UNDO）
+            lsn_t data_lsn = INVALID_LSN;  // 保存数据日志LSN，用于后续设置page_lsn
             if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
                 DeleteLogRecord* log_rec = new DeleteLogRecord(
                     context_->txn_->get_transaction_id(), tab_name_, *rec, rid,
@@ -85,6 +86,7 @@ class DeleteExecutor : public AbstractExecutor {
                 log_rec->prev_lsn_ = context_->txn_->get_prev_lsn();
                 lsn_t lsn = context_->log_mgr_->add_log_to_buffer(log_rec);
                 context_->txn_->set_prev_lsn(lsn);
+                data_lsn = lsn;  // 保存数据操作LSN（后续索引操作会更新prev_lsn）
                 delete log_rec;
 
                 // 记录写操作（用于事务回滚）
@@ -127,10 +129,10 @@ class DeleteExecutor : public AbstractExecutor {
                 fh_->delete_record(rid, context_);
             }
 
-            // 设置页面LSN（WAL）
+            // 设置页面LSN（WAL，使用数据日志LSN而非索引日志LSN）
             if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
                 auto page_handle = fh_->fetch_page_handle(rid.page_no);
-                page_handle.page->set_page_lsn(context_->txn_->get_prev_lsn());
+                page_handle.page->set_page_lsn(data_lsn);
                 sm_manager_->get_bpm()->unpin_page(page_handle.page->get_page_id(), true);
             }
         }

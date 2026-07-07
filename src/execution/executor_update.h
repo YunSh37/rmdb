@@ -151,12 +151,14 @@ class UpdateExecutor : public AbstractExecutor {
             }
 
             // WAL日志：记录UPDATE操作（含新旧记录，用于REDO/UNDO）
+            lsn_t data_lsn = INVALID_LSN;  // 保存数据日志LSN，用于后续设置page_lsn
             if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
                 UpdateLogRecord* log_rec = new UpdateLogRecord(context_->txn_->get_transaction_id(), tab_name_,
                                                                old_rec, *rec, rid);
                 log_rec->prev_lsn_ = context_->txn_->get_prev_lsn();
                 lsn_t lsn = context_->log_mgr_->add_log_to_buffer(log_rec);
                 context_->txn_->set_prev_lsn(lsn);
+                data_lsn = lsn;  // 保存数据操作LSN（后续索引操作会更新prev_lsn）
                 delete log_rec;
 
                 // 记录写操作（用于事务回滚）
@@ -234,10 +236,10 @@ class UpdateExecutor : public AbstractExecutor {
             // 5. 写回修改后的记录（包含用户数据+更新后的MVCC头）
             fh_->update_record(rid, rec->data, context_);
 
-            // 设置页面LSN（WAL）
+            // 设置页面LSN（WAL，使用数据日志LSN而非索引日志LSN）
             if (context_->log_mgr_ != nullptr && context_->txn_ != nullptr) {
                 auto page_handle = fh_->fetch_page_handle(rid.page_no);
-                page_handle.page->set_page_lsn(context_->txn_->get_prev_lsn());
+                page_handle.page->set_page_lsn(data_lsn);
                 sm_manager_->get_bpm()->unpin_page(page_handle.page->get_page_id(), true);
             }
         }
