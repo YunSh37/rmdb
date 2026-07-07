@@ -281,6 +281,16 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     for (RmScan scan(fh); !scan.is_end(); scan.next()) {
         Rid rid = scan.rid();
         auto record = fh->get_record(rid, nullptr);
+
+        // 跳过软删除记录（xmax != INT32_MAX），防止索引包含已删除记录
+        // 的条目。这会导致后续INSERT触发DuplicateKeyError，因为唯一索引
+        // 检查（get_value）不检查MVCC可见性。
+        int user_size = fh->get_user_record_size();
+        MvccHeader* hdr = reinterpret_cast<MvccHeader*>(record->data + user_size);
+        if (hdr->xmax_ != INT32_MAX) {
+            continue;
+        }
+
         // 从记录中提取各列的值，拼成索引键
         int offset = 0;
         for (auto& col : index_cols) {

@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #include "transaction_manager.h"
 #include "record/rm_file_handle.h"
 #include "system/sm_manager.h"
+#include <unordered_set>
 
 std::unordered_map<txn_id_t, Transaction *> TransactionManager::txn_map = {};
 
@@ -220,8 +221,14 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         delete log_rec;
     }
 
-    // 1. 逆序遍历 write_set，撤销所有修改
+    // 1. 收集受影响表名（用于后续刷盘）
+    std::unordered_set<std::string> affected_tables;
     auto write_set = txn->get_write_set();
+    for (auto& wr : *write_set) {
+        affected_tables.insert(wr->GetTableName());
+    }
+
+    // 2. 逆序遍历 write_set，撤销所有修改
     while (!write_set->empty()) {
         WriteRecord* wr = write_set->back();
         write_set->pop_back();
@@ -245,12 +252,38 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         delete wr;
     }
 
-    // 刷盘ABORT日志
+    // 3. 刷盘所有受影响表的数据页和索引页
+    //    CRITICAL: 必须在ABORT日志刷盘前执行，否则crash恢复时：
+    //    - 检查点可能已将该事务的数据刷到磁盘
+    //    - ABORT的undo操作仅修改了缓冲池（无WAL日志记录）
+    //    - REDO阶段aborted_txns_跳过该事务所有操作
+    //    - UNDO阶段事务不在ATT中
+    //    → 磁盘上永久保留已ABORT事务的数据！
+    //    通过先刷盘undo结果再写ABORT日志，确保ABORT日志存在时undo已持久化
+    for (auto& tab_name : affected_tables) {
+        if (sm_manager_->fhs_.count(tab_name)) {
+            auto fh = sm_manager_->fhs_.at(tab_name).get();
+            sm_manager_->get_bpm()->flush_all_pages(fh->GetFd());
+            sm_manager_->get_disk_manager()->sync_file(fh->GetFd());
+        }
+        // 刷盘该表的所有索引文件
+        auto& tab = sm_manager_->db_.get_table(tab_name);
+        for (auto& index : tab.indexes) {
+            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name, index.cols);
+            if (sm_manager_->ihs_.count(ix_name)) {
+                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                sm_manager_->get_bpm()->flush_all_pages(ih->get_fd());
+                sm_manager_->get_disk_manager()->sync_file(ih->get_fd());
+            }
+        }
+    }
+
+    // 4. 刷盘ABORT日志（此时undo的脏页已持久化）
     if (log_manager != nullptr) {
         log_manager->flush_log_to_disk();
     }
 
-    // 2. 释放所有锁（遍历lock_set逐一unlock）
+    // 5. 释放所有锁（遍历lock_set逐一unlock）
     auto lock_set = txn->get_lock_set();
     for (auto it = lock_set->begin(); it != lock_set->end(); ) {
         LockDataId lid = *it;
@@ -259,9 +292,9 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
     }
     // 清理间隙锁（谓词范围锁）
     lock_manager_->remove_predicate_ranges(txn->get_transaction_id());
-    // 3. 清空索引相关资源
+    // 6. 清空索引相关资源
     txn->get_index_latch_page_set()->clear();
     txn->get_index_deleted_page_set()->clear();
-    // 4. 更新事务状态为已中止
+    // 7. 更新事务状态为已中止
     txn->set_state(TransactionState::ABORTED);
 }
