@@ -213,14 +213,6 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
  * @param {LogManager} *log_manager 日志管理器指针
  */
 void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
-    // WAL日志：记录事务ABORT（在undo之前写日志）
-    if (log_manager != nullptr) {
-        AbortLogRecord* log_rec = new AbortLogRecord(txn->get_transaction_id());
-        log_rec->prev_lsn_ = txn->get_prev_lsn();
-        log_manager->add_log_to_buffer(log_rec);
-        delete log_rec;
-    }
-
     // 1. 收集受影响表名（用于后续刷盘）
     std::unordered_set<std::string> affected_tables;
     auto write_set = txn->get_write_set();
@@ -228,24 +220,21 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         affected_tables.insert(wr->GetTableName());
     }
 
-    // 2. 逆序遍历 write_set，撤销所有修改
+    // 2. 逆序遍历 write_set，撤销所有修改（仅修改缓冲池，不产生WAL）
     while (!write_set->empty()) {
         WriteRecord* wr = write_set->back();
         write_set->pop_back();
 
         switch (wr->GetWriteType()) {
             case WType::INSERT_TUPLE:
-                // 撤销插入：删除记录 + 删除索引条目
                 undo_insert(sm_manager_, wr->GetTableName(), wr->GetRid());
                 break;
 
             case WType::DELETE_TUPLE:
-                // 撤销删除：重新插入旧记录 + 重建索引条目
                 undo_delete(sm_manager_, wr->GetTableName(), wr->GetRecord(), wr->GetRid());
                 break;
 
             case WType::UPDATE_TUPLE:
-                // 撤销更新：写回旧记录 + 恢复旧索引条目
                 undo_update(sm_manager_, wr->GetTableName(), wr->GetRecord(), wr->GetRid());
                 break;
         }
@@ -253,13 +242,8 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
     }
 
     // 3. 刷盘所有受影响表的数据页和索引页
-    //    CRITICAL: 必须在ABORT日志刷盘前执行，否则crash恢复时：
-    //    - 检查点可能已将该事务的数据刷到磁盘
-    //    - ABORT的undo操作仅修改了缓冲池（无WAL日志记录）
-    //    - REDO阶段aborted_txns_跳过该事务所有操作
-    //    - UNDO阶段事务不在ATT中
-    //    → 磁盘上永久保留已ABORT事务的数据！
-    //    通过先刷盘undo结果再写ABORT日志，确保ABORT日志存在时undo已持久化
+    //    必须在ABORT日志写入前执行，确保ABORT日志存在于磁盘时undo已持久化。
+    //    这样崩溃恢复时若看到ABORT日志，磁盘上的undo数据必然是完整的。
     for (auto& tab_name : affected_tables) {
         if (sm_manager_->fhs_.count(tab_name)) {
             auto fh = sm_manager_->fhs_.at(tab_name).get();
@@ -278,9 +262,15 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         }
     }
 
-    // 4. 刷盘ABORT日志（此时undo的脏页已持久化）
+    // 4. WAL日志：记录事务ABORT（在undo已完成并刷盘后写日志）
+    //    崩溃恢复时，ABORT日志的存在保证undo数据已在磁盘上，
+    //    恢复流程可以安全地跳过此事务（其undo效果已持久化）。
     if (log_manager != nullptr) {
+        AbortLogRecord* log_rec = new AbortLogRecord(txn->get_transaction_id());
+        log_rec->prev_lsn_ = txn->get_prev_lsn();
+        log_manager->add_log_to_buffer(log_rec);
         log_manager->flush_log_to_disk();
+        delete log_rec;
     }
 
     // 5. 释放所有锁（遍历lock_set逐一unlock）

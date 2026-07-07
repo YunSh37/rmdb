@@ -58,9 +58,6 @@ private:
     /** DPT: 脏页表 (PageId → 该页首次变脏的LSN) */
     std::unordered_map<PageId, lsn_t, PageIdHash> dpt_;
 
-    /** 已中止事务集合（这些事务的操作在REDO时应跳过） */
-    std::unordered_set<txn_id_t> aborted_txns_;
-
     /** REDO起始LSN（DPT中最小LSN） */
     lsn_t redo_lsn_ = INVALID_LSN;
 

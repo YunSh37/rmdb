@@ -153,11 +153,12 @@ void RecoveryManager::analyze() {
                 att_.erase(tid);
                 break;
             }
-            case LogType::ABORT: {
-                att_.erase(tid);
-                aborted_txns_.insert(tid);
+            case LogType::ABORT:
+                // ABORT日志作为no-op：事务保留在ATT中以备UNDO。
+                // 正常流程中ABORT undo已刷盘（abort()先刷盘后写ABORT日志），
+                // 若ABORT日志存在则undo已持久化，UNDO阶段的undo操作是幂等的。
+                // 若ABORT日志丢失则事务仍在ATT中，UNDO会正确回滚。
                 break;
-            }
             case LogType::CHECKPOINT:
                 break;
             case LogType::INSERT: {
@@ -259,8 +260,6 @@ void RecoveryManager::redo() {
         uint32_t log_len = *reinterpret_cast<const uint32_t*>(log_data_.data() + offset + OFFSET_LOG_TOT_LEN);
         lsn_t lsn = *reinterpret_cast<const lsn_t*>(log_data_.data() + offset + OFFSET_LSN);
         if (log_len == 0 || offset + log_len > static_cast<int>(log_data_.size())) break;
-        txn_id_t tid = *reinterpret_cast<const txn_id_t*>(log_data_.data() + offset + OFFSET_LOG_TID);
-        if (aborted_txns_.count(tid) > 0) { offset += log_len; continue; }
 
         switch (log_type) {
             case LogType::INSERT: {
