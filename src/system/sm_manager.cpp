@@ -445,6 +445,16 @@ void SmManager::rebuild_all_indexes() {
         for (RmScan scan(fh); !scan.is_end(); scan.next()) {
             Rid rid = scan.rid();
             auto record = fh->get_record(rid, nullptr);
+
+            // 跳过软删除记录（xmax != INT32_MAX），防止重建的索引包含
+            // 已删除记录的条目。这会导致后续INSERT触发DuplicateKeyError，
+            // 因为唯一索引检查（get_value）不检查MVCC可见性。
+            int user_size = fh->get_user_record_size();
+            MvccHeader* hdr = reinterpret_cast<MvccHeader*>(record->data + user_size);
+            if (hdr->xmax_ != INT32_MAX) {
+                continue;
+            }
+
             int offset = 0;
             for (auto& col : index_cols) {
                 memcpy(key_buf + offset, record->data + col.offset, col.len);
