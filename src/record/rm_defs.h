@@ -96,6 +96,7 @@ struct RmRecord {
         }
         data = new char[size];
         memcpy(data, data_ + sizeof(int), size);
+        allocated_ = true;  // 标记已分配，确保析构函数正确释放内存
     }
 
     ~RmRecord() {
