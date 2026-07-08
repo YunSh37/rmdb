@@ -220,10 +220,13 @@ IxIndexHandle::IxIndexHandle(DiskManager *disk_manager, BufferPoolManager *buffe
     disk_manager_->read_page(fd, IX_FILE_HDR_PAGE, buf, PAGE_SIZE);
     file_hdr_ = new IxFileHdr();
     file_hdr_->deserialize(buf);
+    delete[] buf;  // 释放临时缓冲区
 
-    // disk_manager管理的fd对应的文件中，设置从file_hdr_->num_pages开始分配page_no
-    int now_page_no = disk_manager_->get_fd2pageno(fd);
-    disk_manager_->set_fd2pageno(fd, now_page_no + 1);
+    // 从文件头读取实际的页面数，设置接下来从此值开始分配新page_no。
+    // 注意：不能依赖 fd2pageno_[fd]，因为 fd 可能在 destroy_file+create_file 后
+    // 被复用或变化，导致 fd2pageno_[fd] 的值不正确（如为 0）。
+    // 若从错误的页码开始分配，新页面可能覆盖页面 1（叶子头页），破坏 B+Tree 结构。
+    disk_manager_->set_fd2pageno(fd, file_hdr_->num_pages_);
 }
 
 /**

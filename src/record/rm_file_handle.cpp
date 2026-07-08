@@ -78,7 +78,8 @@ std::pair<Rid, lsn_t> RmFileHandle::insert_record_with_log(char* buf, Context* c
     int slot_no = Bitmap::first_bit(false, page_handle.bitmap, file_hdr_.num_records_per_page);
     Rid rid = {.page_no = page_handle.page->get_page_id().page_no, .slot_no = slot_no};
 
-    // 2. 修改页面前先写 INSERT 日志并强制落盘，避免数据页先于WAL持久化（WAL原则）。
+    // 2. 修改页面前先写 INSERT 日志（WAL原则：日志先于数据）。
+    //    日志先进入缓冲区，由 COMMIT 时统一刷盘（与 DELETE/UPDATE 行为一致）。
     lsn_t lsn = INVALID_LSN;
     if (context != nullptr && context->log_mgr_ != nullptr && context->txn_ != nullptr) {
         RmRecord record(file_hdr_.record_size);
@@ -86,7 +87,6 @@ std::pair<Rid, lsn_t> RmFileHandle::insert_record_with_log(char* buf, Context* c
         InsertLogRecord log_rec(context->txn_->get_transaction_id(), record, rid, tab_name);
         log_rec.prev_lsn_ = context->txn_->get_prev_lsn();
         lsn = context->log_mgr_->add_log_to_buffer(&log_rec);
-        context->log_mgr_->flush_log_to_disk();
         context->txn_->set_prev_lsn(lsn);
     }
 
