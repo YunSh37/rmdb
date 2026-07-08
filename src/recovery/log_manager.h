@@ -629,6 +629,7 @@ public:
     LogBuffer* get_log_buffer() { return &log_buffer_; }
     lsn_t get_persist_lsn() { return persist_lsn_; }
     lsn_t get_global_lsn() { return global_lsn_.load(); }
+    void set_next_lsn(lsn_t lsn) { global_lsn_.store(lsn); }
 
 private:
     std::atomic<lsn_t> global_lsn_{0};  // 全局lsn，递增，用于为每条记录分发lsn

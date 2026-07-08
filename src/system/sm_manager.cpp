@@ -121,6 +121,57 @@ void SmManager::flush_meta() {
 }
 
 /**
+ * @description: 强制将当前数据库的元数据、表文件和索引文件全部刷盘
+ */
+void SmManager::flush_all_files() {
+    // 1. 先写出并同步数据库元数据
+    flush_meta();
+    if (disk_manager_->is_file(DB_META_NAME)) {
+        int meta_fd = disk_manager_->get_file_fd(DB_META_NAME);
+        disk_manager_->sync_file(meta_fd);
+        disk_manager_->close_file(meta_fd);
+    }
+
+    // 2. 同步所有表文件：文件头、缓冲池脏页、文件本身
+    for (auto& entry : fhs_) {
+        auto* fh = entry.second.get();
+        fh->sync_file_header();
+        buffer_pool_manager_->flush_all_pages(fh->GetFd());
+        disk_manager_->sync_file(fh->GetFd());
+    }
+
+    // 3. 同步所有索引文件：文件头、缓冲池脏页、文件本身
+    for (auto& entry : ihs_) {
+        auto* ih = entry.second.get();
+        ih->sync_file_header();
+        buffer_pool_manager_->flush_all_pages(ih->get_fd());
+        disk_manager_->sync_file(ih->get_fd());
+    }
+}
+
+/**
+ * @description: 扫描所有表记录，返回MVCC头中出现过的最大时间戳
+ */
+timestamp_t SmManager::get_max_record_timestamp() {
+    timestamp_t max_ts = INVALID_TXN_ID;
+    for (auto& entry : fhs_) {
+        auto* fh = entry.second.get();
+        int user_size = fh->get_user_record_size();
+        for (RmScan scan(fh); !scan.is_end(); scan.next()) {
+            auto record = fh->get_record(scan.rid(), nullptr);
+            auto* hdr = reinterpret_cast<MvccHeader*>(record->data + user_size);
+            if (hdr->xmin_ != INT32_MAX && hdr->xmin_ > max_ts) {
+                max_ts = hdr->xmin_;
+            }
+            if (hdr->xmax_ != INT32_MAX && hdr->xmax_ > max_ts) {
+                max_ts = hdr->xmax_;
+            }
+        }
+    }
+    return max_ts;
+}
+
+/**
  * @description: 关闭数据库并把数据落盘
  */
 void SmManager::close_db() {

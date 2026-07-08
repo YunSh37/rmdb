@@ -13,6 +13,13 @@ See the Mulan PSL v2 for more details. */
 #include "ix_scan.h"
 #include "recovery/log_manager.h"
 
+void IxIndexHandle::sync_file_header() {
+    char* data = new char[file_hdr_->tot_len_];
+    file_hdr_->serialize(data);
+    disk_manager_->write_page(fd_, IX_FILE_HDR_PAGE, data, file_hdr_->tot_len_);
+    delete[] data;
+}
+
 /**
  * @brief 在当前node中查找第一个>=target的key_idx
  *
@@ -895,24 +902,8 @@ void IxIndexHandle::maintain_child(IxNodeHandle *node, int child_idx) {
  */
 void IxIndexHandle::log_index_page_modify(IxNodeHandle* node, const char* before_image,
                                            Transaction* txn, const std::string& index_name) {
-    if (txn == nullptr || index_name.empty()) return;
-    LogManager* log_mgr = txn->get_log_mgr();
-    if (log_mgr == nullptr) return;
-
-    // 捕获修改后的页面镜像
-    char after_image[PAGE_SIZE];
-    memcpy(after_image, node->page->get_data(), PAGE_SIZE);
-
-    // 创建物理日志记录（含前后镜像，用于REDO/UNDO）
-    IndexPageModifyLogRecord* rec = new IndexPageModifyLogRecord(
-        txn->get_transaction_id(), fd_, node->get_page_no(),
-        before_image, after_image, index_name);
-    rec->prev_lsn_ = txn->get_prev_lsn();
-    lsn_t lsn = log_mgr->add_log_to_buffer(rec);
-    txn->set_prev_lsn(lsn);
-
-    // 设置页面LSN（用于REDO时的LSN比较）
-    node->page->set_page_lsn(lsn);
-
-    delete rec;
+    // 题目十一恢复完成后会从表数据全量重建索引，B+Tree 页级物理日志不仅体积大，
+    // 还难以完整覆盖 split/merge/root/header 等所有结构变化。这里不再写索引物理日志，
+    // 避免大数据恢复测试因海量 PAGE_SIZE 镜像日志导致超时。
+    return;
 }

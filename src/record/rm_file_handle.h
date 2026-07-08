@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 #include <assert.h>
 
 #include <memory>
+#include <vector>
 
 #include "bitmap.h"
 #include "common/context.h"
@@ -82,6 +83,29 @@ class RmFileHandle {
     /** 获取用户数据大小（不含MVCC头） */
     int get_user_record_size() const { return file_hdr_.record_size - MVCC_HEADER_SIZE; }
 
+    /**
+     * @brief 确保指定数据页在磁盘上存在（供恢复 redo 使用）
+     * 若文件不够大，用正确初始化的空页填充，避免零页导致的 next_free_page_no=0
+     * （其值应为 RM_NO_PAGE=-1），防止后续页面满时误将文件头页(0)当作空闲数据页。
+     */
+    bool ensure_page_exists(int page_no) {
+        int file_size = disk_manager_->get_file_size(disk_manager_->get_file_name(fd_));
+        if (file_size < 0) return false;
+        int required_size = (page_no + 1) * PAGE_SIZE;
+        if (file_size < required_size) {
+            // 在内存中构建正确初始化的空页
+            std::vector<char> page_buf(PAGE_SIZE, 0);
+            auto* phdr = reinterpret_cast<RmPageHdr*>(page_buf.data());
+            phdr->next_free_page_no = RM_NO_PAGE;   // -1，区别于文件头页0
+            phdr->num_records = 0;
+            Bitmap::init(page_buf.data() + sizeof(RmPageHdr), file_hdr_.bitmap_size);
+            disk_manager_->write_page(fd_, page_no, page_buf.data(), PAGE_SIZE);
+            disk_manager_->sync_file(fd_);
+            printf("[Recovery] 扩展文件 到第%d页（已初始化页面头）\n", page_no);
+        }
+        return true;
+    }
+
     /* 判断指定位置上是否已经存在一条记录，通过Bitmap来判断 */
     bool is_record(const Rid &rid) const {
         RmPageHandle page_handle = fetch_page_handle(rid.page_no);
@@ -93,6 +117,9 @@ class RmFileHandle {
     std::unique_ptr<RmRecord> get_record(const Rid &rid, Context *context) const;
 
     Rid insert_record(char *buf, Context *context);
+
+    /** 插入记录并在页面修改前写入INSERT日志（确保WAL顺序：先写日志再写数据） */
+    std::pair<Rid, lsn_t> insert_record_with_log(char *buf, Context *context, const std::string &tab_name);
 
     void insert_record(const Rid &rid, char *buf);
 

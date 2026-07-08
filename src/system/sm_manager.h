@@ -66,6 +66,12 @@ class SmManager {
 
     void flush_meta();
 
+    /** 强制将元数据、所有表文件和索引文件刷盘 */
+    void flush_all_files();
+
+    /** 扫描表记录中的MVCC头，返回已使用的最大事务时间戳 */
+    timestamp_t get_max_record_timestamp();
+
     void show_tables(Context* context);
 
     void desc_table(const std::string& tab_name, Context* context);

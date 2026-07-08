@@ -174,6 +174,9 @@ class IxIndexHandle {
     int fd_;                                    // 存储B+树的文件
    public:
     int get_fd() const { return fd_; }           // 获取文件描述符（用于缓冲池页面回收等）
+
+    /** 强制将索引文件头写回磁盘 */
+    void sync_file_header();
    private:
     IxFileHdr* file_hdr_;                       // 存了root_page，但其初始化为2（第0页存FILE_HDR_PAGE，第1页存LEAF_HEADER_PAGE）
     std::mutex root_latch_;

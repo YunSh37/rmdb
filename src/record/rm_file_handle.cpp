@@ -66,6 +66,48 @@ Rid RmFileHandle::insert_record(char* buf, Context* context) {
 }
 
 /**
+ * @description: 插入记录并在页面修改前写入INSERT日志（确保WAL顺序：先写日志再写数据）
+ * @param {char*} buf 要插入的完整记录
+ * @param {Context*} context 执行上下文
+ * @param {string&} tab_name 表名，用于构造日志
+ * @return {pair<Rid, lsn_t>} 插入位置和INSERT日志LSN
+ */
+std::pair<Rid, lsn_t> RmFileHandle::insert_record_with_log(char* buf, Context* context, const std::string &tab_name) {
+    // 1. 获取当前有空闲空间的 page handle。先分配位置，真正写入slot前必须先写WAL。
+    RmPageHandle page_handle = create_page_handle();
+    int slot_no = Bitmap::first_bit(false, page_handle.bitmap, file_hdr_.num_records_per_page);
+    Rid rid = {.page_no = page_handle.page->get_page_id().page_no, .slot_no = slot_no};
+
+    // 2. 修改页面前先写 INSERT 日志并强制落盘，避免数据页先于WAL持久化（WAL原则）。
+    lsn_t lsn = INVALID_LSN;
+    if (context != nullptr && context->log_mgr_ != nullptr && context->txn_ != nullptr) {
+        RmRecord record(file_hdr_.record_size);
+        memcpy(record.data, buf, file_hdr_.record_size);
+        InsertLogRecord log_rec(context->txn_->get_transaction_id(), record, rid, tab_name);
+        log_rec.prev_lsn_ = context->txn_->get_prev_lsn();
+        lsn = context->log_mgr_->add_log_to_buffer(&log_rec);
+        context->log_mgr_->flush_log_to_disk();
+        context->txn_->set_prev_lsn(lsn);
+    }
+
+    // 3. 写入记录并设置页面LSN（日志已落盘，数据页修改是安全的）
+    char* slot = page_handle.get_slot(slot_no);
+    memcpy(slot, buf, file_hdr_.record_size);
+    Bitmap::set(page_handle.bitmap, slot_no);
+    page_handle.page_hdr->num_records++;
+    if (lsn != INVALID_LSN) {
+        page_handle.page->set_page_lsn(lsn);
+    }
+
+    if (page_handle.page_hdr->num_records == file_hdr_.num_records_per_page) {
+        file_hdr_.first_free_page_no = page_handle.page_hdr->next_free_page_no;
+    }
+    buffer_pool_manager_->mark_dirty(page_handle.page);
+    buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), true);
+    return {rid, lsn};
+}
+
+/**
  * @description: 在当前表中的指定位置插入一条记录
  * @param {Rid&} rid 要插入记录的位置
  * @param {char*} buf 要插入记录的数据

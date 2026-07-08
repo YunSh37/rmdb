@@ -34,6 +34,9 @@ public:
     /** 获取恢复后的事务ID最大值（用于恢复时间戳避免MVCC可见性错误） */
     txn_id_t get_max_txn_id() const { return max_txn_id_; }
 
+    /** 获取日志中出现过的最大LSN（用于恢复后继续分配单调递增LSN） */
+    lsn_t get_max_lsn() const { return max_lsn_; }
+
 private:
     /** 从日志数据中反序列化一条日志记录 */
     std::unique_ptr<LogRecord> parse_log_record(const char* data);
@@ -44,8 +47,7 @@ private:
     /** 安全获取文件fd（表文件可能已被删除，返回-1表示不存在） */
     int get_file_fd_safe(const std::string& tab_name);
 
-    /** 确保指定页面在磁盘上存在（若不存在则写入零页扩展文件） */
-    bool ensure_page_exists(const std::string& tab_name, int page_no);
+    // ensure_page_exists 已移至 RmFileHandle 成员方法（正确初始化页面头）
 
     DiskManager* disk_manager_;
     BufferPoolManager* buffer_pool_manager_;
@@ -64,14 +66,6 @@ private:
     /** 日志文件偏移记录：(LSN, 文件偏移量) —— 用于undo阶段快速定位日志 */
     std::vector<std::pair<lsn_t, int>> lsn_offsets_;
 
-    /** REDO 提示数组（与 lsn_offsets_ 一一对应），避免 REDO 阶段重复反序列化
-     *  仅对 INSERT/UPDATE/DELETE 有效，fd=-1 表示非数据操作 */
-    struct RedoHint {
-        int fd = -1;
-        int page_no = 0;
-    };
-    std::vector<RedoHint> redo_hints_;
-
     /** 完整日志数据（在analyze阶段读入） */
     std::vector<char> log_data_;
 
@@ -80,4 +74,7 @@ private:
 
     /** 恢复后的最大事务ID（用于恢复时间戳避免MVCC可见性错误） */
     txn_id_t max_txn_id_ = INVALID_TXN_ID;
+
+    /** 日志中出现过的最大LSN（用于恢复后继续分配日志号） */
+    lsn_t max_lsn_ = INVALID_LSN;
 };

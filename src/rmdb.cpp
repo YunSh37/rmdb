@@ -312,17 +312,23 @@ int main(int argc, char **argv) {
         recovery->redo();
         recovery->undo();
 
-        // 恢复事务ID和时间戳（避免crash后时间戳重置导致MVCC可见性错误）
-        txn_id_t max_txn_id = recovery->get_max_txn_id();
+        // 恢复事务ID、时间戳和日志LSN（避免crash后时间戳/LSN回退）
+        txn_id_t max_txn_id = std::max(recovery->get_max_txn_id(), sm_manager->get_max_record_timestamp());
         if (max_txn_id != INVALID_TXN_ID) {
             txn_manager->set_next_txn_id(max_txn_id + 1);
             txn_manager->set_next_timestamp(max_txn_id + 1);
             printf("[Recovery] 恢复时间戳: txn_id/timestamp从 %d 开始\n",
                    max_txn_id + 1);
         }
+        if (recovery->get_max_lsn() != INVALID_LSN) {
+            log_manager->set_next_lsn(recovery->get_max_lsn() + 1);
+        }
 
         // 恢复后重建所有索引（crash后索引页可能丢失，需从数据表重建）
         sm_manager->rebuild_all_indexes();
+
+        // 截断WAL前必须先持久化恢复结果，确保二次crash后仍有一致的表和索引
+        sm_manager->flush_all_files();
 
         // 恢复完成后截断日志文件（避免LSN冲突，为新日志腾出空间）
         // 关闭旧日志文件，删除它，然后创建新的空日志文件
@@ -334,7 +340,11 @@ int main(int argc, char **argv) {
             disk_manager->destroy_file(LOG_FILE_NAME);
         }
         disk_manager->create_file(LOG_FILE_NAME);
-        
+        // 注意：不重置 LSN！截断 WAL 后 LSN 必须保持单调递增。
+        // 旧页面在 flush_all_files() 时已持久化到磁盘，其 page_lsn 可能很大。
+        // 若重置 LSN 为 0，则下一次崩溃恢复时，旧页面的 page_lsn > 新日志 LSN，
+        // 导致 redo 误判为"已应用"而跳过，造成已提交数据丢失。
+        // （LSN 是逻辑编号，与物理日志文件偏移无关，继续递增不会导致任何问题。）
         // 开启服务端，开始接受客户端连接
         start_server();
     } catch (RMDBError &e) {
