@@ -1,5 +1,6 @@
 # === 构建产物 ===
 build/
+doc/
 cmake-build-*/
 CMakeCache.txt
 CMakeFiles/
