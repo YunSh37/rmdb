@@ -10,6 +10,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "sm_manager.h"
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -115,9 +116,19 @@ void SmManager::open_db(const std::string& db_name) {
  * @description: 把数据库相关的元数据刷入磁盘中
  */
 void SmManager::flush_meta() {
-    // 默认清空文件
+    // 默认清空文件并写入当前元数据
     std::ofstream ofs(DB_META_NAME);
     ofs << db_;
+    ofs.close();  // 显式关闭确保 C++ 缓冲区写入 OS
+
+    // fsync 确保元数据持久化到磁盘。
+    // 若仅写入不 fsync，crash 后 DB_META_NAME 可能丢失或为空，
+    // 导致 open_db 时找不到任何表 → "Table not found"。
+    int fd = open(DB_META_NAME.c_str(), O_RDONLY);
+    if (fd >= 0) {
+        fsync(fd);
+        close(fd);
+    }
 }
 
 /**

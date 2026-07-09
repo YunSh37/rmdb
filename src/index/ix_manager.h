@@ -129,6 +129,9 @@ class IxManager {
 
         disk_manager_->set_fd2pageno(fd, IX_INIT_NUM_PAGES - 1);  // DEBUG
 
+        // fsync 确保索引文件持久化到磁盘（crash 后文件必须存在且内容完整）
+        disk_manager_->sync_file(fd);
+
         // Close index file
         disk_manager_->close_file(fd);
     }

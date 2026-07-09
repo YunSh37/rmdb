@@ -52,6 +52,11 @@ void LogManager::flush_log_to_disk() {
     // 写入磁盘
     disk_manager_->write_log(log_buffer_.buffer_, log_buffer_.offset_);
 
+    // CRITICAL: fsync 确保 WAL 日志真正持久化到磁盘。
+    // 若没有 fsync，COMMIT/ABORT/CHECKPOINT 日志可能仅存在于 OS 缓冲区缓存中，
+    // 服务器 crash 后这些关键日志丢失 → 已提交事务被错误回滚。
+    disk_manager_->sync_file(disk_manager_->GetLogFd());
+
     // 更新持久化LSN（当前global_lsn_-1即是最后一条写入的日志）
     persist_lsn_ = global_lsn_.load() - 1;
 

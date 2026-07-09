@@ -131,41 +131,16 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
             }
             case T_Checkpoint:
             {
-                // 静态检查点：先收集DPT → 刷盘所有脏页 → 写检查点日志
-                // 关键：DPT 必须在刷盘**前**收集，记录刷盘前最后一刻的脏页快照
-                // 使用表名+页号代替fd+页号，确保恢复时能正确定位页面
-                std::vector<std::tuple<std::string, page_id_t, lsn_t>> dpt;
+                // 静态检查点：收集ATT → 刷盘所有文件和索引 → 写检查点日志并fsync
+                // 使用 flush_all_files() 统一处理元数据、表文件、索引文件的持久化，
+                // 确保检查点后的恢复可以从一个完整一致的状态开始。
+
+                // 1. 写回所有数据：元数据 + 表文件（含文件头+脏页+fsync）+ 索引文件
+                sm_manager_->flush_all_files();
+
+                // 2. 写检查点日志（记录当前活跃事务ATT快照）
                 if (context->log_mgr_ != nullptr) {
-                    // 1. 收集DPT（刷盘前的脏页快照），返回(PageId, lsn)
-                    auto raw_dpt = sm_manager_->get_bpm()->collect_dirty_pages();
-
-                    // 构建fd→表名的反向映射
-                    std::unordered_map<int, std::string> fd_to_table;
-                    for (auto& [tab_name, fh] : sm_manager_->fhs_) {
-                        fd_to_table[fh->GetFd()] = tab_name;
-                    }
-
-                    // 转换为(表名, page_no, lsn)格式，恢复时不依赖fd
-                    for (auto& [pid, lsn] : raw_dpt) {
-                        auto it = fd_to_table.find(pid.fd);
-                        if (it != fd_to_table.end()) {
-                            dpt.emplace_back(it->second, pid.page_no, lsn);
-                        }
-                    }
-                }
-
-                // 2. 遍历所有打开的表文件：写回文件头 + 刷盘脏页 + fsync
-                //    文件头（含 num_pages）必须持久化，因为 create_new_page_handle()
-                //    只更新内存中的 num_pages 而不写磁盘，crash 后文件头是旧值
-                for (auto& [tab_name, fh] : sm_manager_->fhs_) {
-                    fh->sync_file_header();                                  // 写回文件头
-                    sm_manager_->get_bpm()->flush_all_pages(fh->GetFd());    // 刷盘数据页
-                    sm_manager_->get_disk_manager()->sync_file(fh->GetFd()); // fsync
-                }
-
-                // 3. 写检查点日志（记录当前ATT和DPT快照）
-                if (context->log_mgr_ != nullptr) {
-                    // 收集ATT
+                    // 收集ATT：所有非COMMITTED且非ABORTED的事务
                     std::vector<std::pair<txn_id_t, lsn_t>> att;
                     for (auto& [tid, txn] : txn_mgr_->txn_map) {
                         if (txn->get_state() != TransactionState::COMMITTED &&
@@ -176,9 +151,10 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
 
                     auto* ckpt = new CheckpointLogRecord();
                     ckpt->set_att(att);
-                    ckpt->set_dpt(dpt);  // 刷盘前的脏页快照（表名格式）
+                    // DPT 不记录：恢复时做全日志扫描 REDO（更可靠，避免 DPT 遗漏）
+                    ckpt->set_dpt({});
                     context->log_mgr_->add_log_to_buffer(ckpt);
-                    context->log_mgr_->flush_log_to_disk();
+                    context->log_mgr_->flush_log_to_disk();  // 包含 fsync
                     delete ckpt;
                 }
                 // 返回成功信息
