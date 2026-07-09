@@ -169,6 +169,8 @@ void RecoveryManager::analyze() {
         total_records++;
     }
 
+    total_log_records_ = total_records;
+
     printf("[Recovery::Analyze] 记录=%d条 ATT=%zu redo_lsn=%d max_txn=%d max_lsn=%d\n",
            total_records, att_.size(), redo_lsn_, max_txn_id_, max_lsn_);
 }

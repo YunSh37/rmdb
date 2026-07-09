@@ -124,7 +124,8 @@ void SmManager::flush_meta() {
     // fsync 确保元数据持久化到磁盘。
     // 若仅写入不 fsync，crash 后 DB_META_NAME 可能丢失或为空，
     // 导致 open_db 时找不到任何表 → "Table not found"。
-    int fd = open(DB_META_NAME.c_str(), O_RDONLY);
+    // 使用 O_RDWR 打开以兼容 POSIX 标准（fsync 需要可写文件描述符）。
+    int fd = open(DB_META_NAME.c_str(), O_RDWR);
     if (fd >= 0) {
         fsync(fd);
         close(fd);

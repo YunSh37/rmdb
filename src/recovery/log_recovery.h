@@ -37,6 +37,9 @@ public:
     /** 获取日志中出现过的最大LSN（用于恢复后继续分配单调递增LSN） */
     lsn_t get_max_lsn() const { return max_lsn_; }
 
+    /** 判断WAL中是否有日志记录需要恢复处理 */
+    bool has_log_records() const { return total_log_records_ > 0; }
+
 private:
     /** 从日志数据中反序列化一条日志记录 */
     std::unique_ptr<LogRecord> parse_log_record(const char* data);
@@ -77,4 +80,7 @@ private:
 
     /** 日志中出现过的最大LSN（用于恢复后继续分配日志号） */
     lsn_t max_lsn_ = INVALID_LSN;
+
+    /** 日志中扫描到的总记录数（用于判断是否需要恢复后处理） */
+    int total_log_records_ = 0;
 };
