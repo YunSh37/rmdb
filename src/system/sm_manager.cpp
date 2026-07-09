@@ -121,14 +121,13 @@ void SmManager::flush_meta() {
     ofs << db_;
     ofs.close();  // 显式关闭确保 C++ 缓冲区写入 OS
 
-    // fsync 确保元数据持久化到磁盘。
-    // 若仅写入不 fsync，crash 后 DB_META_NAME 可能丢失或为空，
-    // 导致 open_db 时找不到任何表 → "Table not found"。
-    // 使用 O_RDWR 打开以兼容 POSIX 标准（fsync 需要可写文件描述符）。
-    int fd = open(DB_META_NAME.c_str(), O_RDWR);
-    if (fd >= 0) {
-        fsync(fd);
-        close(fd);
+    // 通过 DiskManager 同步元数据（使用 O_RDWR 打开，兼容 POSIX 标准）。
+    // 这样避免直接 open()+fsync() 在不同 Linux 内核上的兼容性问题。
+    // 确保 DDL 操作（建表/建索引）后 crash 不会丢失元数据。
+    if (disk_manager_->is_file(DB_META_NAME)) {
+        int fd = disk_manager_->get_file_fd(DB_META_NAME);
+        disk_manager_->sync_file(fd);
+        disk_manager_->close_file(fd);
     }
 }
 
@@ -136,13 +135,8 @@ void SmManager::flush_meta() {
  * @description: 强制将当前数据库的元数据、表文件和索引文件全部刷盘
  */
 void SmManager::flush_all_files() {
-    // 1. 先写出并同步数据库元数据
+    // 1. 先写出并同步数据库元数据（flush_meta 内部通过 DiskManager sync_file 确保持久化）
     flush_meta();
-    if (disk_manager_->is_file(DB_META_NAME)) {
-        int meta_fd = disk_manager_->get_file_fd(DB_META_NAME);
-        disk_manager_->sync_file(meta_fd);
-        disk_manager_->close_file(meta_fd);
-    }
 
     // 2. 同步所有表文件：文件头、缓冲池脏页、文件本身
     for (auto& entry : fhs_) {
