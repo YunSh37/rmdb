@@ -31,6 +31,9 @@ public:
         lock_manager_->set_txn_mgr(this);  // 设置事务管理器指针（用于死锁检测）
     }
 
+    /** 获取下一个事务ID（原子操作，线程安全） */
+    txn_id_t get_next_txn_id() { return next_txn_id_.fetch_add(1); }
+
     /** 获取下一个时间戳（原子操作，线程安全） */
     timestamp_t get_next_timestamp() { return next_timestamp_.fetch_add(1); }
 

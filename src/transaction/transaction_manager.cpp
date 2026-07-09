@@ -174,12 +174,16 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
     // 两阶段封锁：进入 SHRINKING 阶段（之后只能释放锁，不能获取锁）
     txn->set_state(TransactionState::SHRINKING);
 
-    // WAL日志：记录事务COMMIT（在释放锁之前写日志，确保持久化）
+    // WAL日志：记录事务COMMIT
+    // 只读事务（write_set为空，如纯SELECT）无需 fsync——没有数据修改需要持久化，
+    // COMMIT日志留在缓冲区中，后续写事务commit或缓冲区满时会统一刷盘。
     if (log_manager != nullptr) {
         CommitLogRecord* log_rec = new CommitLogRecord(txn->get_transaction_id());
         log_rec->prev_lsn_ = txn->get_prev_lsn();
         log_manager->add_log_to_buffer(log_rec);
-        log_manager->flush_log_to_disk();  // COMMIT日志必须立即刷盘
+        if (!txn->get_write_set()->empty()) {
+            log_manager->flush_log_to_disk();  // 有写操作才刷盘
+        }
         delete log_rec;
     }
 
