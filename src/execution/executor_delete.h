@@ -88,6 +88,8 @@ class DeleteExecutor : public AbstractExecutor {
                 context_->txn_->set_prev_lsn(lsn);
                 data_lsn = lsn;  // 保存数据操作LSN（后续索引操作会更新prev_lsn）
                 delete log_rec;
+                // 立即刷盘：确保 DELETE 日志在数据页修改前已持久化
+                context_->log_mgr_->flush_log_to_disk();
 
                 // 记录写操作（用于事务回滚）
                 auto wr = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec);

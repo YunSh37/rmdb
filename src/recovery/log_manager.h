@@ -633,7 +633,7 @@ public:
 
 private:
     std::atomic<lsn_t> global_lsn_{0};  // 全局lsn，递增，用于为每条记录分发lsn
-    std::mutex latch_;                  // 用于对log_buffer_的互斥访问
+    std::recursive_mutex latch_;        // 用于对log_buffer_的互斥访问（递归锁，允许flush在add内部重入）
     LogBuffer log_buffer_;              // 日志缓冲区
     lsn_t persist_lsn_{INVALID_LSN};    // 记录已经持久化到磁盘中的最后一条日志的日志号
     DiskManager* disk_manager_;

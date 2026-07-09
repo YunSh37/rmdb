@@ -17,7 +17,7 @@ See the Mulan PSL v2 for more details. */
  * @return {lsn_t} 返回该日志的日志记录号
  */
 lsn_t LogManager::add_log_to_buffer(LogRecord* log_record) {
-    std::unique_lock<std::mutex> lock(latch_);
+    std::unique_lock<std::recursive_mutex> lock(latch_);
 
     // 1. 分配LSN
     lsn_t lsn = global_lsn_.fetch_add(1);
@@ -42,9 +42,12 @@ lsn_t LogManager::add_log_to_buffer(LogRecord* log_record) {
 }
 
 /**
- * @description: 把日志缓冲区的内容刷到磁盘中，由于目前只设置了一个缓冲区，因此需要阻塞其他日志操作
+ * @description: 把日志缓冲区的内容刷到磁盘中
+ * 使用 recursive_mutex 确保多线程安全：commit/abort/checkpoint/executor 均可安全调用
  */
 void LogManager::flush_log_to_disk() {
+    std::unique_lock<std::recursive_mutex> lock(latch_);
+
     if (log_buffer_.offset_ == 0) {
         return;  // 缓冲区为空，无需刷盘
     }

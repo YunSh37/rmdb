@@ -476,8 +476,13 @@ void SmManager::rebuild_all_indexes() {
         std::string ix_name = ix_manager_->get_index_name(info.tab_name, info.col_names);
         if (ihs_.count(ix_name)) {
             auto* ih = ihs_[ix_name].get();
-            get_bpm()->discard_all_pages(ih->get_fd());   // 丢弃缓冲池中该fd的所有缓存页
-            ix_manager_->close_index(ih);
+            // 先丢弃缓冲池中该fd的所有缓存页，防止后续fd复用导致数据污染
+            get_bpm()->discard_all_pages(ih->get_fd());
+            // 直接关闭fd，不调用 close_index()。
+            // close_index() 会 new char[file_hdr_->tot_len_] 并写回文件头——
+            // SIGKILL 后索引文件可能损坏，tot_len_ 为垃圾值会导致 bad_alloc 崩溃。
+            // 反正该文件马上就被 destroy_file 删除，无需保留任何内容。
+            disk_manager_->close_file(ih->get_fd());
             ihs_.erase(ix_name);
         }
         if (disk_manager_->is_file(ix_name)) {

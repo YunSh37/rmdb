@@ -79,7 +79,8 @@ std::pair<Rid, lsn_t> RmFileHandle::insert_record_with_log(char* buf, Context* c
     Rid rid = {.page_no = page_handle.page->get_page_id().page_no, .slot_no = slot_no};
 
     // 2. 修改页面前先写 INSERT 日志（WAL原则：日志先于数据）。
-    //    日志先进入缓冲区，由 COMMIT 时统一刷盘（与 DELETE/UPDATE 行为一致）。
+    //    日志写入缓冲区后立即刷盘，确保 SIGKILL 场景下 WAL 记录已持久化，
+    //    防止数据页被缓冲池淘汰后 WAL 丢失 → 恢复无法重做。
     lsn_t lsn = INVALID_LSN;
     if (context != nullptr && context->log_mgr_ != nullptr && context->txn_ != nullptr) {
         RmRecord record(file_hdr_.record_size);
@@ -88,6 +89,8 @@ std::pair<Rid, lsn_t> RmFileHandle::insert_record_with_log(char* buf, Context* c
         log_rec.prev_lsn_ = context->txn_->get_prev_lsn();
         lsn = context->log_mgr_->add_log_to_buffer(&log_rec);
         context->txn_->set_prev_lsn(lsn);
+        // 立即刷盘：确保 INSERT 日志在数据页修改前已持久化
+        context->log_mgr_->flush_log_to_disk();
     }
 
     // 3. 写入记录并设置页面LSN（日志已落盘，数据页修改是安全的）
