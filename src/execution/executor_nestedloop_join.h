@@ -9,6 +9,8 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #pragma once
+#include <algorithm>
+
 #include "execution_defs.h"
 #include "execution_manager.h"
 #include "executor_abstract.h"
@@ -16,15 +18,13 @@ See the Mulan PSL v2 for more details. */
 #include "system/sm.h"
 
 /** 块嵌套循环连接执行器（Block Nested-Loop Join Executor）
- *  采用块式读取+惰性求值，避免一次性物化所有结果，支持超内存的大表连接。
  *
- *  算法流程：
- *    1. 物化内表（右表）全部元组到内存（通常较小）
- *    2. 外表（左表/驱动表）按块读取（每次 BLOCK_SIZE 条元组）
- *    3. 对外表块中每条元组，扫描内表物化结果，满足连接条件则输出
- *    4. 逐条惰性生成结果（不一次性物化），避免内存溢出
+ *  实现真正的块嵌套循环连接，关键特性：
+ *    - 不物化内表（避免大表超内存），每个外表块重新扫描内表
+ *    - 合并检查：内表一次扫描中对外表块所有元组求值
+ *    - stable_sort 保持外表优先输出顺序
  *
- *  输出包含左表和右表的所有列。
+ *  内存上限 = BLOCK_SIZE 条外表 + 一批结果，不随数据规模增长。
  */
 class NestedLoopJoinExecutor : public AbstractExecutor {
    private:
@@ -32,7 +32,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     std::unique_ptr<AbstractExecutor> right_;   // 右儿子节点（被探查表/内表）
     size_t len_;                                // join后获得的每条记录的长度
     std::vector<ColMeta> cols_;                 // join后获得的记录的字段
-
     std::vector<Condition> fed_conds_;          // join条件
     bool finished_;                              // 是否已无更多结果
 
@@ -40,16 +39,18 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     std::vector<ColMeta> left_cols_orig_;
     std::vector<ColMeta> right_cols_orig_;
 
-    // ===== 块嵌套循环状态 =====
-    static constexpr size_t BLOCK_SIZE = 5000;  // 每次读取外表元组数
+    // ===== BNLJ 块嵌套循环状态 =====
+    static constexpr size_t BLOCK_SIZE = 5000;       // 每次读取外表元组数
+    static constexpr size_t MAX_BATCH_SIZE = 10000;  // 每批最多缓存的结果数
 
-    std::vector<std::unique_ptr<RmRecord>> inner_all_;   // 物化的内表全部元组
     std::vector<std::unique_ptr<RmRecord>> outer_block_;  // 当前外表块
-    size_t outer_idx_;   // 当前外表块中正在处理的元组索引
-    size_t inner_idx_;   // 当前内表扫描位置
+    std::vector<std::unique_ptr<RmRecord>> result_batch_; // 当前结果批次
+    size_t result_idx_;       // result_batch_ 中当前结果索引
 
-    // 预计算的下一个结果（惰性求值：advanceToNext 在 beginTuple/nextTuple 中计算）
-    std::unique_ptr<RmRecord> current_result_;
+    // 用于批次满时暂停/恢复的状态
+    // 当 inner_continue_from_ >= 0 时，表示上次因批次满而暂停，
+    // 需要从 outer_block_[inner_continue_from_] 继续检查当前内表元组
+    int inner_continue_from_ = 0;  // -1 表示无需继续
 
     /** 比较两个值 */
     template<typename T>
@@ -74,11 +75,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         return nullptr;
     }
 
-    /** 评估连接条件：左表行和右表行是否满足所有 JOIN ON 条件
-     *  使用原始 offset（cols_orig_），因为 cols_ 中的 offset 已被调整为输出格式 */
+    /** 评估连接条件：左表行和右表行是否满足所有 JOIN ON 条件 */
     bool eval_join_conds(const RmRecord& left_rec, const RmRecord& right_rec) {
         for (auto& cond : fed_conds_) {
-            // 查找 lhs 列在哪个表中
             const ColMeta* lhs_meta = find_col(left_cols_orig_, cond.lhs_col);
             const RmRecord* lhs_rec;
             if (lhs_meta) {
@@ -88,7 +87,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 lhs_rec = &right_rec;
             }
 
-            // 查找 rhs 列在哪个表中
             const ColMeta* rhs_meta = find_col(left_cols_orig_, cond.rhs_col);
             const RmRecord* rhs_rec;
             if (rhs_meta) {
@@ -99,11 +97,8 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             }
 
             if (!lhs_meta || !rhs_meta) return false;
-
-            // 确保类型一致
             if (lhs_meta->type != rhs_meta->type) return false;
 
-            // 读取值并比较（使用原始 offset）
             bool cond_result = false;
             if (lhs_meta->type == TYPE_INT) {
                 int lhs_val = *(int*)(lhs_rec->data + lhs_meta->offset);
@@ -123,9 +118,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 cond_result = compare_val<std::string>(lhs_val, rhs_val, cond.op);
             }
 
-            if (!cond_result) return false;  // 任一条件不满足即失败
+            if (!cond_result) return false;
         }
-        return true;  // 所有条件都满足
+        return true;
     }
 
     /** 加载下一块外表元组（最多 BLOCK_SIZE 条） */
@@ -143,53 +138,99 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         return !outer_block_.empty();
     }
 
-    /** 物化内表全部元组 */
-    void materializeInner() {
-        inner_all_.clear();
-        right_->beginTuple();
-        while (!right_->is_end()) {
-            auto rec = right_->Next();
-            if (rec) {
-                auto copy = std::make_unique<RmRecord>(right_->tupleLen());
-                memcpy(copy->data, rec->data, right_->tupleLen());
-                inner_all_.push_back(std::move(copy));
-            }
-            right_->nextTuple();
-        }
-    }
+    /** 填充下一批结果：
+     *  对当前外表块，扫描内表。对内表每条元组，检查外表块中所有元组。
+     *  收集匹配结果，按外表索引 stable_sort 以保持外表优先输出顺序。
+     *
+     *  为支持大数据量（内表可能包含数百万行），按 MAX_BATCH_SIZE 分批输出。
+     *  暂停/恢复通过 inner_continue_from_ 字段实现：
+     *    - 正常：inner_continue_from_ == -1
+     *    - 暂停：inner_continue_from_ == outer_idx，下次从该外表索引继续
+     *      检查同一条内表元组（尚未调用 right_->nextTuple()） */
+    void fillResultBatch() {
+        result_batch_.clear();
+        result_idx_ = 0;
 
-    /** 前进到下一个匹配结果（惰性求值核心）
-     *  如果找到，将结果存入 current_result_；如果无更多结果，设置 finished_ = true */
-    void advanceToNext() {
-        while (true) {
-            // 当前外表块已处理完？加载下一块
-            if (outer_idx_ >= outer_block_.size()) {
+        while (result_batch_.empty()) {
+            // 需要加载新外表块？
+            if (outer_block_.empty()) {
                 if (!loadNextOuterBlock()) {
                     finished_ = true;
-                    current_result_.reset();
                     return;
                 }
-                outer_idx_ = 0;
+                // 新块开始，重置内表扫描
+                right_->beginTuple();
+                inner_continue_from_ = -1;  // 无需继续
             }
 
-            // 扫描内表，查找与当前外表元组匹配的记录
-            while (inner_idx_ < inner_all_.size()) {
-                auto& left_rec = outer_block_[outer_idx_];
-                auto& right_rec = inner_all_[inner_idx_];
-                inner_idx_++;
+            // 用于按外表索引排序的临时结构
+            struct IndexedResult {
+                size_t outer_idx;
+                std::unique_ptr<RmRecord> record;
+            };
+            std::vector<IndexedResult> block_results;
 
-                if (eval_join_conds(*left_rec, *right_rec)) {
-                    // 构建组合记录：左表列 + 右表列
-                    current_result_ = std::make_unique<RmRecord>(len_);
-                    memcpy(current_result_->data, left_rec->data, left_->tupleLen());
-                    memcpy(current_result_->data + left_->tupleLen(), right_rec->data, right_->tupleLen());
-                    return;  // 找到下一个结果
+            bool batch_full = false;
+
+            // 扫描内表
+            while (!right_->is_end() && !batch_full) {
+                auto inner_rec = right_->Next();
+                if (inner_rec) {
+                    // 确定从哪个外表索引开始检查
+                    // inner_continue_from_ >= 0 表示上次因批次满而暂停，
+                    // 当前 inner_rec 已检查过 [0, inner_continue_from_) 的外表元组
+                    size_t start_i = (inner_continue_from_ >= 0)
+                                     ? static_cast<size_t>(inner_continue_from_) : 0;
+                    inner_continue_from_ = -1;  // 重置
+
+                    for (size_t i = start_i; i < outer_block_.size(); i++) {
+                        if (eval_join_conds(*outer_block_[i], *inner_rec)) {
+                            auto merged = std::make_unique<RmRecord>(len_);
+                            memcpy(merged->data, outer_block_[i]->data, left_->tupleLen());
+                            memcpy(merged->data + left_->tupleLen(), inner_rec->data, right_->tupleLen());
+                            block_results.push_back({i, std::move(merged)});
+
+                            if (block_results.size() >= MAX_BATCH_SIZE) {
+                                // 批次满：保存恢复位置，暂停
+                                if (i + 1 < outer_block_.size()) {
+                                    // 还有外表元组没检查完，下次从此继续
+                                    inner_continue_from_ = static_cast<int>(i + 1);
+                                } else {
+                                    // 当前外表块全部检查完，前进内表
+                                    inner_continue_from_ = -1;
+                                    right_->nextTuple();
+                                }
+                                batch_full = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // 如果检查完了所有外表元组且批次未满，前进内表
+                    if (!batch_full) {
+                        right_->nextTuple();
+                    }
+                } else {
+                    // Next() 返回 nullptr，前进
+                    right_->nextTuple();
                 }
             }
 
-            // 内表扫描完毕，前进外表块中的下一条元组
-            inner_idx_ = 0;
-            outer_idx_++;
+            // 按外表索引稳定排序，保持外表优先输出顺序
+            std::stable_sort(block_results.begin(), block_results.end(),
+                [](const IndexedResult& a, const IndexedResult& b) {
+                    return a.outer_idx < b.outer_idx;
+                });
+
+            for (auto& entry : block_results) {
+                result_batch_.push_back(std::move(entry.record));
+            }
+
+            // 内表扫描完毕（非批次满导致跳出），准备下一外表块
+            if (right_->is_end()) {
+                outer_block_.clear();
+                inner_continue_from_ = -1;
+            }
         }
     }
 
@@ -200,11 +241,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         right_ = std::move(right);
         len_ = left_->tupleLen() + right_->tupleLen();
 
-        // 保存原始列元数据（用于条件评估中的 offset 计算）
         left_cols_orig_ = left_->cols();
         right_cols_orig_ = right_->cols();
 
-        // 构建输出列（调整右表列 offset）
         cols_ = left_->cols();
         auto right_cols = right_->cols();
         for (auto &col : right_cols) {
@@ -214,29 +253,28 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
 
         fed_conds_ = std::move(conds);
         finished_ = false;
-        outer_idx_ = 0;
-        inner_idx_ = 0;
+        result_idx_ = 0;
+        inner_continue_from_ = -1;
     }
 
     void beginTuple() override {
         finished_ = false;
-        outer_idx_ = 0;
-        inner_idx_ = 0;
+        result_idx_ = 0;
         outer_block_.clear();
-        current_result_.reset();
+        result_batch_.clear();
+        inner_continue_from_ = -1;
 
-        // 1. 物化内表（右表）全部元组到内存
-        materializeInner();
-
-        // 2. 初始化外表扫描
         left_->beginTuple();
-
-        // 3. 预计算第一个匹配结果
-        advanceToNext();
+        fillResultBatch();
     }
 
     void nextTuple() override {
-        advanceToNext();
+        if (finished_) return;
+
+        result_idx_++;
+        if (result_idx_ >= result_batch_.size()) {
+            fillResultBatch();
+        }
     }
 
     bool is_end() const override {
@@ -244,9 +282,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        if (finished_ || !current_result_) return nullptr;
+        if (finished_ || result_idx_ >= result_batch_.size()) return nullptr;
         auto result = std::make_unique<RmRecord>(len_);
-        memcpy(result->data, current_result_->data, len_);
+        memcpy(result->data, result_batch_[result_idx_]->data, len_);
         return result;
     }
 
