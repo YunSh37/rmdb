@@ -485,11 +485,11 @@ def test5_without_checkpoint():
     _ = start_fresh('tp5_nockpt')
     s = connect()
     create_all_tables(s)
-    insert_base_data(s, num_warehouses=3, num_items=50)
+    insert_base_data(s, num_warehouses=5, num_items=100)
 
-    # 执行 50 个事务（大量数据）
-    print('  执行 50 个事务...')
-    for t in range(1, 51):
+    # 执行 200 个事务（巨量数据，匹配文档描述）
+    print('  执行 200 个事务...')
+    for t in range(1, 201):
         run_transaction(s, o_id=t)
 
     send_sql(s, 'SELECT * FROM warehouse;')
@@ -521,12 +521,12 @@ def test6_with_checkpoint(t1):
     _ = start_fresh('tp6_ckpt')
     s = connect()
     create_all_tables(s)
-    insert_base_data(s, num_warehouses=3, num_items=50)
+    insert_base_data(s, num_warehouses=5, num_items=100)
 
-    # 执行 50 个事务，随机创建检查点
-    print('  执行 50 个事务（随机创建检查点）...')
+    # 执行 200 个事务（与测试点5相同规模），随机创建检查点
+    print('  执行 200 个事务（随机创建检查点）...')
     ckpt_count = 0
-    for t in range(1, 51):
+    for t in range(1, 201):
         run_transaction(s, o_id=t)
         # 30% 概率随机创建检查点（模拟文档中"不定时发送 create static_checkpoint"）
         if random.random() < 0.3:

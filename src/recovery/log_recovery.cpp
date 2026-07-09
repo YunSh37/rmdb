@@ -141,9 +141,22 @@ void RecoveryManager::analyze() {
                 // ABORT 日志只在正常回滚完成并刷盘后写入，看到它即可认为事务已结束。
                 att_.erase(tid);
                 break;
-            case LogType::CHECKPOINT:
+            case LogType::CHECKPOINT: {
                 checkpoint_lsn_ = lsn;
+                // 从检查点日志恢复 ATT 快照（WAL 可能在检查点时被截断，
+                // 旧日志中的 BEGIN 记录已丢失，必须依赖检查点的 ATT 来识别活跃事务）
+                auto ckpt_record = parse_log_record(log_data_.data() + offset);
+                auto* ckpt = dynamic_cast<CheckpointLogRecord*>(ckpt_record.get());
+                if (ckpt) {
+                    for (auto& [t, prev_lsn] : ckpt->att_) {
+                        if (att_.find(t) == att_.end()) {
+                            att_[t] = prev_lsn;
+                            printf("[Recovery::Analyze] 从检查点恢复 ATT: txn=%d prev_lsn=%d\n", t, prev_lsn);
+                        }
+                    }
+                }
                 break;
+            }
             case LogType::INDEX_PAGE_MODIFY:
                 // 索引页日志不参与最终正确性，恢复后会全量重建索引。
                 if (tid != INVALID_TXN_ID && att_.count(tid)) att_[tid] = lsn;
@@ -171,10 +184,19 @@ void RecoveryManager::redo() {
 
     int redo_count = 0;
     int total_count = 0;
+    int skipped_count = 0;
     int bytes_total = static_cast<int>(log_data_.size());
 
     for (auto& [lsn, offset] : lsn_offsets_) {
         if (offset + LOG_HEADER_SIZE > bytes_total) continue;
+
+        // 检查点优化：LSN <= checkpoint_lsn_ 的数据页已在检查点时通过
+        // flush_all_files() 持久化到磁盘，无需重做。
+        if (checkpoint_lsn_ != INVALID_LSN && lsn <= checkpoint_lsn_) {
+            skipped_count++;
+            continue;
+        }
+
         auto record = parse_log_record(log_data_.data() + offset);
         if (!record) continue;
         total_count++;
@@ -270,7 +292,8 @@ void RecoveryManager::redo() {
         }
     }
 
-    printf("[Recovery::Redo] 扫描 %d 条记录，应用了 %d 条 REDO\n", total_count, redo_count);
+    printf("[Recovery::Redo] 扫描 %d 条记录，应用了 %d 条 REDO (跳过 %d 条检查点前记录)\n",
+           total_count + skipped_count, redo_count, skipped_count);
 }
 
 /* ================================================================

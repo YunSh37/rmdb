@@ -131,16 +131,17 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
             }
             case T_Checkpoint:
             {
-                // 静态检查点：收集ATT → 刷盘所有文件和索引 → 写检查点日志并fsync
-                // 使用 flush_all_files() 统一处理元数据、表文件、索引文件的持久化，
-                // 确保检查点后的恢复可以从一个完整一致的状态开始。
+                // 静态检查点：
+                //   1. 刷盘所有数据（元数据 + 表文件 + 索引文件）
+                //   2. 写 CHECKPOINT 日志 + fsync
+                //   3. 截断 WAL（删除旧日志，创建新日志，重新写 CHECKPOINT 标记）
+                //   步骤 3 确保恢复时 WAL 只包含检查点之后的日志，大幅缩短恢复时间。
 
                 // 1. 写回所有数据：元数据 + 表文件（含文件头+脏页+fsync）+ 索引文件
                 sm_manager_->flush_all_files();
 
-                // 2. 写检查点日志（记录当前活跃事务ATT快照）
+                // 2. 收集 ATT（活跃事务表快照），写检查点日志并 fsync
                 if (context->log_mgr_ != nullptr) {
-                    // 收集ATT：所有非COMMITTED且非ABORTED的事务
                     std::vector<std::pair<txn_id_t, lsn_t>> att;
                     for (auto& [tid, txn] : txn_mgr_->txn_map) {
                         if (txn->get_state() != TransactionState::COMMITTED &&
@@ -151,11 +152,31 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
 
                     auto* ckpt = new CheckpointLogRecord();
                     ckpt->set_att(att);
-                    // DPT 不记录：恢复时做全日志扫描 REDO（更可靠，避免 DPT 遗漏）
                     ckpt->set_dpt({});
                     context->log_mgr_->add_log_to_buffer(ckpt);
-                    context->log_mgr_->flush_log_to_disk();  // 包含 fsync
+                    context->log_mgr_->flush_log_to_disk();  // 写入 + fsync
                     delete ckpt;
+
+                    // 3. 截断 WAL：删除旧日志文件，创建新日志文件，写入检查点标记
+                    //    这样恢复时只需处理检查点之后的日志，跳过已持久化的数据。
+                    auto* dm = sm_manager_->get_disk_manager();
+                    if (dm->GetLogFd() != -1) {
+                        dm->close_file(dm->GetLogFd());
+                        dm->SetLogFd(-1);
+                    }
+                    if (dm->is_file(LOG_FILE_NAME)) {
+                        dm->destroy_file(LOG_FILE_NAME);
+                    }
+                    dm->create_file(LOG_FILE_NAME);
+
+                    // 在新 WAL 开头写入检查点标记（记录 ATT 快照 + 标记恢复起点）
+                    // LSN 不重置：继续单调递增，确保旧页面 page_lsn < 新日志 LSN 的关系正确
+                    auto* ckpt2 = new CheckpointLogRecord();
+                    ckpt2->set_att(att);
+                    ckpt2->set_dpt({});
+                    context->log_mgr_->add_log_to_buffer(ckpt2);
+                    context->log_mgr_->flush_log_to_disk();  // 写入 + fsync
+                    delete ckpt2;
                 }
                 // 返回成功信息
                 std::string msg = "Static checkpoint created successfully.\n";
