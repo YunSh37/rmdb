@@ -93,12 +93,16 @@ class RmFileHandle {
         if (file_size < 0) return false;
         int required_size = (page_no + 1) * PAGE_SIZE;
         if (file_size < required_size) {
-            // 在内存中构建正确初始化的空页
+            // 在内存中构建正确初始化的空页。
+            // 页面布局: [LSN(4字节)] [RmPageHdr(8字节)] [bitmap] [slots]
             std::vector<char> page_buf(PAGE_SIZE, 0);
-            auto* phdr = reinterpret_cast<RmPageHdr*>(page_buf.data());
+            // RmPageHdr 位于 LSN 之后（偏移 OFFSET_PAGE_HDR=4 字节）
+            auto* phdr = reinterpret_cast<RmPageHdr*>(page_buf.data() + Page::OFFSET_PAGE_HDR);
             phdr->next_free_page_no = RM_NO_PAGE;   // -1，区别于文件头页0
             phdr->num_records = 0;
-            Bitmap::init(page_buf.data() + sizeof(RmPageHdr), file_hdr_.bitmap_size);
+            // bitmap 位于 RmPageHdr 之后
+            Bitmap::init(page_buf.data() + Page::OFFSET_PAGE_HDR + sizeof(RmPageHdr),
+                         file_hdr_.bitmap_size);
             disk_manager_->write_page(fd_, page_no, page_buf.data(), PAGE_SIZE);
             disk_manager_->sync_file(fd_);
             printf("[Recovery] 扩展文件 到第%d页（已初始化页面头）\n", page_no);
